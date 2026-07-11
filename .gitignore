@@ -1,6 +1,8 @@
 env_prod.json
    logs/
 
+originales/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
