@@ -1,8 +1,9 @@
 env_prod.json
-descargas/
-logs/
+descargas/*
+!descargas/.gitkeep
 originales/
-xlsforms/
+xlsforms/*
+!xlsforms/.gitkeep
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
