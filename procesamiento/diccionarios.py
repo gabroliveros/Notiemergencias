@@ -24,16 +24,19 @@ EMERGENCIAS = {
     'victimas': ['victima', 'fallecido', 'muerto', 'herido', 'lesionado', 'desaparecido', 'damnificado', 'cadaver', 'atrapado', 'deceso'],
     'rescate': ['rescate', 'salvamento', 'evacuacion', 'bomberos', 'proteccion civil', 'paramedicos', 'busqueda', 'sobreviviente', 'inparques', 'voluntarios'],
 
-    # Medios de transporte, logística y maquinaria
-    'aereo': ['helicoptero', 'avion', 'dron', 'uav', 'super puma', 'cougar', 'hercules', 'avioneta'],
-    'acuatico': ['lancha', 'bote', 'zodiac', 'peñero', 'curiara', 'canoa', 'buque', 'patrullera', 'salvavidas', 'acuatico'],
-    'terrestre': ['ambulancia', 'rustico', 'jeep', 'machito', 'camion', 'convoy', 'retroexcavadora', 'tractor', 'payloader', 'grua', 'autobus', '4x4', 'vehiculo'],
-
     # Atención, salud y refugio
     'atencion': ['refugio', 'albergue', 'cancha', 'iglesia', 'hospital', 'clinica', 'cdi', 'ambulatorio', 'carpa', 'campamento', 'triaje', 'acopio', 'donacion', 'insumos', 'medicinas', 'alimentos', 'agua potable'],
 
     # Tipos de eventos y desastres
-    'eventos': ['sismo', 'terremoto', 'temblor', 'replica', 'escala richter', 'inundacion', 'anegacion', 'desbordamiento', 'crecida', 'deslave', 'derrumbe', 'deslizamiento', 'alud', 'barro', 'aguacero', 'tormenta', 'precipitaciones', 'vaguada', 'lluvia', 'onda tropical'],
+    'eventos': [
+        'sismo', 'terremoto', 'temblor', 'replica', 'escala richter', 'inundacion', 'anegacion',
+        'desbordamiento', 'crecida', 'deslave', 'derrumbe', 'deslizamiento', 'alud', 'barro',
+        'aguacero', 'tormenta', 'precipitaciones', 'vaguada', 'lluvia', 'onda tropical',
+        # Sequía (agregado)
+        'sequia', 'racionamiento', 'escasez de agua', 'embalses bajos', 'nivel de embalses',
+        # Huracán / ciclón tropical (agregado)
+        'huracan', 'tormenta tropical', 'ciclon', 'vientos huracanados', 'marejada',
+    ],
 }
 
 # Subcategorías usadas para agrupar/renombrar frecuencias (ver frecuencias() en limpieza_clasificacion.py)
@@ -44,37 +47,13 @@ EQUIVALENCIAS_FRECUENCIA = {
         'centro_acopio': ['acopio', 'donaciones', 'recoleccion'],
     },
     'eventos': {
-        'sismo': ['tembl', 'tiembla', 'terremoto', 'replica', 'sismo'],
-        'inundacion': ['inund', 'aneg', 'desbord', 'crecida'],
-        'deslave': ['deslave', 'derrumbe', 'deslizamiento', 'alud', 'barro'],
-        'rescate': ['rescate', 'evacu', 'salvamento', 'busqueda'],
-        'colapso': ['colapso', 'caida', 'rotura', 'falla', 'sin servicio'],
-        'lluvias': ['aguacero', 'tormenta', 'precipitaciones', 'vaguada'],
-    },
-    'aereo': {
-        'helicoptero': ['helicoptero', 'super puma', 'cougar'],
-        'avion': ['avion', 'hercules', 'carguero'],
-        'dron': ['dron', 'drone', 'uav'],
-    },
-    'acuatico': {
-        'rescate': ['lancha', 'zodiac', 'bote', 'salvavidas'],
-        'masivo': ['buque', 'patrullera', 'fragata'],
-        'rural': ['peñero', 'curiara', 'canoa'],
-    },
-    'terrestre': {
-        'emergencia': ['ambulancia', 'paramedicos', 'bomberos'],
-        'maquinaria': ['retroexcavadora', 'tractor', 'payloader', 'grua'],
-        'rescate': ['rustico', 'jeep', 'machito', '4x4', 'proteccion civil'],
-        'masivo': ['autobus', 'convoy', 'camion', 'carguero'],
+        'sismo': ['tembl', 'tiembla', 'terremoto', 'replica', 'sismo', 'sismic', 'escala de richter', 'funvisis'],
+        'lluvias': ['aguacero', 'tormenta', 'precipitaciones', 'vaguada', 'inund', 'aneg', 'desbordamiento', 'crecida del',
+                    'deslave', 'deslizamiento', 'alud', 'onda tropical'],
+        'huracan': ['huracan', 'huracanados', 'ventarron', 'tornado', 'rafagas de viento', 'ventisca'],
+        'sequia': ['sequia', 'estres hidrico', 'deshidratacion', 'desierto']
     },
 }
-
-# Renombres/eliminaciones para el top 10 de vehículos y maquinaria
-CAMBIOS_VEHICULOS = {
-    'Jeep': 'Rustico', 'Machito': 'Rustico', 'Zodiac': 'Lancha',
-    'Payloader': 'Retroexcavadora', 'Super puma': 'Helicoptero', 'Convoy': 'Camion',
-}
-ELIMINAR_VEHICULOS = ['Terminal', 'Estacion', 'Taller']
 
 # --------------------------------------------------------------------------
 # Filtro de países distintos a Venezuela (para excluir ruido de otros países)
@@ -96,7 +75,7 @@ AMERICANOS = {
 OTROS_LUGARES_NO_VZLA = (
     r'espana|mar caribe|europa|italia|nueva segovia|cordoba|francia| nong|veracruz|valparaiso|yucatan|'
     r'portugal|venecia|monte alegre|tenerife|vietnam|australia|america del sur|rio de janeiro|miami|'
-    r'istmo caribe| lima|madrid|baja california|bariloche|santo domingo|manongo|alaska|america|santa fe|'
+    r'istmo caribe| lima|madrid|baja california|bariloche|manongo|alaska|america|santa fe|'
     r'el quisco|aruba|antioquia|costa azul|santiago del estero|san jose|punta palma| china|'
     r'santiago de chile|valle del cauca|cartagena|canada|sudamerica|alemania|cucuta|rusia|grecia|curazao|'
     r'nahuel huapi|destructor|armada|militar|narcotrafico|ataque|trump|next day cargo|matanzas| fallec|'

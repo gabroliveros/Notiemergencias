@@ -1,14 +1,23 @@
 # -*- coding: utf-8 -*-
 """
-    Limpieza, filtrado y clasificación de las noticias raspadas por el scraper.
+Limpieza, filtrado y clasificación de las noticias raspadas por el scraper.
 
-    Traducción a módulo (desde procesamiento_busquedas_motor_final.ipynb) de:
-        1) Apertura y acondicionamiento del libro (agrega columnas de trabajo)
-        2) Limpieza y normalización de texto
-        3) Filtrado de registros que no corresponden a Venezuela
-        4) Clasificación por red social, zona, afectación y medios de logística
-        5) NER (spaCy) para lugares y actores/autoridades
-        6) Limpieza de entidades detectadas (blacklist + equivalencias)
+Traducción a módulo (desde procesamiento_busquedas_motor_final.ipynb) de:
+  1) Apertura y acondicionamiento del libro (agrega columnas de trabajo)
+  2) Limpieza y normalización de texto
+  3) Filtrado de registros que no corresponden a Venezuela
+  4) Clasificación por red social, zona, afectación y medios de logística
+  5) NER (spaCy) para lugares y actores/autoridades
+  6) Limpieza de entidades detectadas (blacklist + equivalencias)
+
+Cambios respecto al notebook original (avisar si no se quieren):
+  - Se agregó `normalizar_fecha()`: convierte la columna `fecha` (ya corregida
+    en el scraper) a un `datetime` real en `fecha_dt`, necesario para que el
+    dashboard pueda filtrar/ordenar por fecha.
+  - Se omitió el bloque de `dr4` (registros de "turismo" filtrados con la
+    variable `paq`), porque `paq` nunca estaba definida en el notebook y ese
+    bloque no se guardaba (era código muerto de la versión anterior de turismo).
+  - Los diccionarios y listas geográficas se movieron a diccionarios.py.
 """
 
 import re
@@ -20,8 +29,6 @@ from unidecode import unidecode
 from procesamiento.diccionarios import (
     EMERGENCIAS,
     EQUIVALENCIAS_FRECUENCIA,
-    CAMBIOS_VEHICULOS,
-    ELIMINAR_VEHICULOS,
     VZLA_PATTERN,
     AMER_PATTERN,
     SIGNOS_PATTERN,
@@ -33,7 +40,45 @@ from procesamiento.diccionarios import (
 
 ZONAS = ['capital', 'andes', 'oriente', 'occidente', 'llanos', 'costa', 'barrio', 'urbanizacion']
 AFECTACION = ['daños', 'victimas', 'rescate']
-MEDIOS_LOGISTICA = ['aereo', 'acuatico', 'terrestre']
+
+# DuckDuckGo antepone la fecha real de publicación al snippet cuando la
+# tiene (ej: "25 jul 2025Caracas.- Autoridades han elevado..."). Cuando NO
+# la tiene, suele ser una señal de que el resultado es ruido no relacionado
+# (páginas genéricas, repos de GitHub, etc. que DDG devuelve como relleno
+# cuando ya no hay más resultados reales para esa query específica).
+PATRON_FECHA_INICIAL = re.compile(
+    r'^\s*\d{1,2}\s+(ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic)[a-z]*\.?\s+\d{4}',
+    re.IGNORECASE,
+)
+
+PATRON_DOMINIOS_EXCLUIDOS = (
+    r'npr\.org|'
+    r'surfer\.com|'
+    r'weawow\.com|'
+    r'tiktok\.com|'
+    r'youtube\.com|'
+    r'instagram\.com|'
+    r'facebook\.com|'
+    r'x\.com|'
+    r'tiempo\.com|'
+    r'eltiempoen\.com|'
+    r'meteoblue\.com|'
+    r'meteored\.com|'
+    r'es\.weather-forecast\.com|'
+    r'weather-atlas\.com'
+)
+
+def filtrar_snippets_con_fecha_inicial(df):
+    """Se queda solo con los registros cuyo snippet_full empieza con una
+    fecha reconocible. Descarta ruido como resultados genéricos o de
+    repositorios sin relación, que DDG a veces devuelve sin fecha cuando ya
+    no hay más resultados relevantes para una combinación medio/estado."""
+    antes = len(df)
+    mask = df['snippet_full'].astype(str).str.match(PATRON_FECHA_INICIAL, na=False)
+    filtrado = df[mask].copy()
+    print(f'Filtro de fecha inicial: {antes} -> {len(filtrado)} registros '
+          f'(se descartaron {antes - len(filtrado)} sin fecha reconocible al inicio del snippet).')
+    return filtrado
 
 
 # --------------------------------------------------------------------------
@@ -51,10 +96,10 @@ def cargar_datos(ruta_excel):
 # 2) Limpieza y normalización
 # --------------------------------------------------------------------------
 
-def limpiar_y_normalizar(df):
+def limpiar_y_normalizar(df):   
     df = df.copy()
     df[['title', 'snippet_full']] = df[['title', 'snippet_full']].astype(str).map(lambda x: x.strip())
-    df = df[~df['url'].str.contains(r'jabertur\.net', na=False)]
+    df = df[~df['url'].str.contains(PATRON_DOMINIOS_EXCLUIDOS, case=False, regex=True, na=False)]
     df = df[(df['snippet_full'] != '') & (df['snippet_full'] != 'nan') & (df['snippet_full'].notna())]
 
     df[['title_clean', 'snippet_full_clean']] = df[['title', 'snippet_full']].map(lambda x: unidecode(x.lower()))
@@ -75,6 +120,27 @@ def normalizar_fecha(df):
     df = df.copy()
     df['fecha_dt'] = pd.to_datetime(df.get('fecha'), format='%Y-%m-%d', errors='coerce')
     return df
+
+
+def filtrar_ventana_fecha(df, fecha_desde=None, fecha_hasta=None):
+    """Descarta noticias fuera de [fecha_desde, fecha_hasta] ('YYYY-MM-DD'
+    o None para no acotar por ese lado). Las filas sin fecha reconocible
+    (fecha_dt es NaT) también se descartan: no se puede verificar que estén
+    dentro de la ventana, y subirlas a Kobo arruina la predicción de alerta."""
+    if fecha_desde is None and fecha_hasta is None:
+        return df
+
+    antes = len(df)
+    mask = df['fecha_dt'].notna()
+    if fecha_desde is not None:
+        mask &= df['fecha_dt'] >= pd.Timestamp(fecha_desde)
+    if fecha_hasta is not None:
+        mask &= df['fecha_dt'] <= pd.Timestamp(fecha_hasta) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+
+    filtrado = df[mask].copy()
+    print(f'Filtro de ventana de fecha ({fecha_desde} a {fecha_hasta}): {antes} -> {len(filtrado)} registros '
+          f'(se descartaron {antes - len(filtrado)} fuera de rango o sin fecha reconocible).')
+    return filtrado
 
 
 # --------------------------------------------------------------------------
@@ -131,29 +197,12 @@ def frecuencias_por_columna(df, columna, agrupar_subcategorias=False):
     return conteo
 
 
-def resumen_logistica_top10(df):
-    """Top 10 de vehículos/maquinaria mencionados, unificando aéreo+acuático+terrestre."""
-    c_aereo = frecuencias_por_columna(df, 'aereo')
-    c_acuatico = frecuencias_por_columna(df, 'acuatico')
-    c_terrestre = frecuencias_por_columna(df, 'terrestre')
-
-    total = pd.concat([c_aereo, c_acuatico, c_terrestre]).groupby(level=0).sum()
-    total = total.rename(index=CAMBIOS_VEHICULOS).groupby(level=0).sum()
-    total = total.drop(labels=ELIMINAR_VEHICULOS, errors='ignore')
-    return total.sort_values(ascending=False)[:10]
-
-
 def generar_resumenes(df):
     """Genera todos los conteos/resúmenes exploratorios del notebook original.
     Devuelve un dict {nombre: pandas.Series} para imprimir o loguear."""
     resumenes = {
         'zonas_afectadas': df[ZONAS].apply(lambda x: x != '').sum().sort_values(ascending=False).rename(str.capitalize),
         'nivel_afectacion': df[AFECTACION].apply(lambda x: x != '').sum().sort_values(ascending=False).rename(str.capitalize),
-        'logistica_categorias': df[MEDIOS_LOGISTICA].apply(lambda x: x != '').sum().sort_values(ascending=False).rename(str.capitalize),
-        'vehiculos_top10': resumen_logistica_top10(df),
-        'logistica_aerea': frecuencias_por_columna(df, 'aereo'),
-        'logistica_acuatica': frecuencias_por_columna(df, 'acuatico'),
-        'logistica_terrestre': frecuencias_por_columna(df, 'terrestre'),
         'centros_atencion': frecuencias_por_columna(df, 'atencion', agrupar_subcategorias=True),
         'tipos_eventos': frecuencias_por_columna(df, 'eventos', agrupar_subcategorias=True),
     }
@@ -262,12 +311,15 @@ def resumen_lugares_y_actores(df, top_lugares=100, top_actores=15):
 # Pipeline completo
 # --------------------------------------------------------------------------
 
-def pipeline_completo(ruta_excel_entrada, ruta_excel_salida, aplicar_ner=False):
-    """Ejecuta todo el flujo: carga -> limpieza -> filtrado -> clasificación
-    -> (opcional) NER -> limpieza de entidades -> guardado."""
+def pipeline_completo(ruta_excel_entrada, ruta_excel_salida, aplicar_ner=False, fecha_desde=None, fecha_hasta=None):
+    """Ejecuta todo el flujo: carga -> filtro de fecha inicial -> limpieza
+    -> filtrado geográfico -> clasificación -> (opcional) NER -> limpieza de
+    entidades -> guardado."""
     df = cargar_datos(ruta_excel_entrada)
+    df = filtrar_snippets_con_fecha_inicial(df)
     df = limpiar_y_normalizar(df)
     df = normalizar_fecha(df)
+    df = filtrar_ventana_fecha(df, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta)
     df = filtrar_venezuela(df)
     df = clasificar_red_social(df)
     df = clasificar_categorias(df)
@@ -276,6 +328,11 @@ def pipeline_completo(ruta_excel_entrada, ruta_excel_salida, aplicar_ner=False):
         df = extraer_entidades_ner(df)
         df = limpiar_entidades_lugares(df)
 
+    # displayed_url/snippet/rich_type llegan vacías o redundantes desde el
+    # scraper (snippet_full ya tiene todo el texto) — se quitan también acá
+    # por si el archivo de entrada viene de una corrida vieja que aún las trae.
+    df = df.drop(columns=['displayed_url', 'snippet', 'rich_type'], errors='ignore')
+
     df.to_excel(ruta_excel_salida, index=False)
     return df
 
@@ -283,8 +340,8 @@ def pipeline_completo(ruta_excel_entrada, ruta_excel_salida, aplicar_ner=False):
 if __name__ == '__main__':
     import sys
 
-    entrada = sys.argv[1] if len(sys.argv) > 1 else 'noticias_vzla_lluvias.xlsx'
-    salida = sys.argv[2] if len(sys.argv) > 2 else 'noticias_vzla_lluvias_procesada.xlsx'
+    entrada = sys.argv[1] if len(sys.argv) > 1 else 'noticias_crudas.xlsx'
+    salida = sys.argv[2] if len(sys.argv) > 2 else 'noticias_procesadas.xlsx'
 
     resultado = pipeline_completo(entrada, salida)
     print(f'Procesado: {resultado.shape[0]} registros -> {salida}')

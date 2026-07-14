@@ -24,7 +24,8 @@ import sys
 
 import pandas as pd
 
-from procesamiento.metricas_alerta import canonicalizar_eventos, extraer_dominio, extraer_estado, _reconstruir_lista
+from procesamiento.metricas_alerta import (canonicalizar_eventos, extraer_dominio, extraer_estado, 
+                                           _reconstruir_lista, filtrar_eventos_por_situacion)
 from kobo.xlsform_builder import nombre_choice
 from kobo.gestionar_formularios import enviar_filas
 
@@ -134,8 +135,17 @@ def preparar_fila_metrica(fila):
 # Pipeline completo
 # --------------------------------------------------------------------------
 
-def pipeline_completo(ruta_noticias_procesadas, ruta_alertas, api_token, minimo_noticias=10,
-                       ruta_registro_envios=RUTA_REGISTRO_ENVIOS_DEFAULT):
+def pipeline_completo(
+    ruta_noticias_procesadas,
+    ruta_alertas,
+    api_token,
+    username,
+    minimo_noticias=10,
+    form_id_noticias=FORM_ID_NOTICIAS,
+    form_id_metricas=FORM_ID_METRICAS,
+    ruta_registro_envios=RUTA_REGISTRO_ENVIOS_DEFAULT,
+    situacion=None
+):
     df_noticias = pd.read_excel(ruta_noticias_procesadas)
     for col in ['eventos', 'victimas', 'rescate', 'daños']:
         if col in df_noticias.columns:
@@ -146,22 +156,39 @@ def pipeline_completo(ruta_noticias_procesadas, ruta_alertas, api_token, minimo_
     df_alertas = pd.read_excel(ruta_alertas)
 
     if df_alertas.empty:
-        print('El archivo de alertas está vacío — no hay nada que subir.')
-        return
+        print('El archivo de alertas está vacío — se subirán noticias relevantes sin nivel de alerta.')
 
-    # --- Noticias: se deduplican contra lo ya enviado en corridas anteriores ---
-    urls_ya_enviadas = cargar_registro_envios(ruta_registro_envios)
-    enriquecidas = enriquecer_noticias_con_alerta(df_noticias, df_alertas)
-    enriquecidas_nuevas = enriquecidas[~enriquecidas['url'].isin(urls_ya_enviadas)]
+    df_alertas = pd.read_excel(ruta_alertas)
+    
+    if df_alertas.empty:
+        print('El archivo de alertas está vacío — se subirán noticias relevantes sin nivel de alerta.')
 
-    omitidas = len(enriquecidas) - len(enriquecidas_nuevas)
-    if omitidas:
-        print(f'{omitidas} noticias de la ventana ya se habían subido en corridas anteriores — se omiten.')
+    if df_noticias.empty:
+        print('No hay noticias relevantes en esta corrida — se omite el envío de noticias.')
+        filas_noticias = []
+        seleccion = df_noticias
+    else:
+        # --- Noticias: se deduplican contra lo ya enviado en corridas anteriores ---
+        urls_ya_enviadas = cargar_registro_envios(ruta_registro_envios)
+        if situacion:
+            df_noticias['tipos_evento_canonico'] = df_noticias['eventos'].apply(canonicalizar_eventos)
 
-    seleccion = seleccionar_noticias(enriquecidas_nuevas, minimo=minimo_noticias)
-    print(f'Noticias nuevas seleccionadas para subir: {len(seleccion)}')
+            df_noticias = df_noticias[
+                df_noticias['tipos_evento_canonico'].apply(
+                    lambda x: len(filtrar_eventos_por_situacion(x, situacion)) > 0
+                )
+            ]
+        enriquecidas = enriquecer_noticias_con_alerta(df_noticias, df_alertas)
+        enriquecidas_nuevas = enriquecidas[~enriquecidas['url'].isin(urls_ya_enviadas)]
 
-    filas_noticias = [preparar_fila_noticia(fila) for _, fila in seleccion.iterrows()]
+        omitidas = len(enriquecidas) - len(enriquecidas_nuevas)
+        if omitidas:
+            print(f'{omitidas} noticias de la ventana ya se habían subido en corridas anteriores — se omiten.')
+
+        seleccion = seleccionar_noticias(enriquecidas_nuevas, minimo=minimo_noticias)
+        print(f'Noticias nuevas seleccionadas para subir: {len(seleccion)}')
+
+        filas_noticias = [preparar_fila_noticia(fila) for _, fila in seleccion.iterrows()]
 
     # --- Métricas: SIN deduplicar, cada corrida agrega su snapshot (línea de tiempo) ---
     filas_metricas = [preparar_fila_metrica(fila) for _, fila in df_alertas.iterrows()]
@@ -169,7 +196,7 @@ def pipeline_completo(ruta_noticias_procesadas, ruta_alertas, api_token, minimo_
     errores_noticias = []
     if filas_noticias:
         print('\nEnviando noticias...')
-        errores_noticias = enviar_filas(FORM_ID_NOTICIAS, filas_noticias, api_token)
+        errores_noticias = enviar_filas(form_id_noticias, filas_noticias, api_token, username)
 
         indices_fallidos = {i for i, _, _ in errores_noticias}
         urls_enviadas_ok = {
@@ -180,7 +207,7 @@ def pipeline_completo(ruta_noticias_procesadas, ruta_alertas, api_token, minimo_
         print('\nNo hay noticias nuevas por enviar en esta corrida.')
 
     print('\nEnviando métricas de alerta (snapshot de esta corrida, se acumula para el histórico)...')
-    errores_metricas = enviar_filas(FORM_ID_METRICAS, filas_metricas, api_token)
+    errores_metricas = enviar_filas(form_id_metricas, filas_metricas, api_token, username)
 
     if errores_noticias:
         print('\nErrores al enviar noticias:', errores_noticias[:3], '...' if len(errores_noticias) > 3 else '')
@@ -191,13 +218,24 @@ def pipeline_completo(ruta_noticias_procesadas, ruta_alertas, api_token, minimo_
 
 
 if __name__ == '__main__':
-    if len(sys.argv) < 4:
-        print('Uso: python -m kobo.subir_a_kobo <noticias_procesadas.xlsx> <alertas.xlsx> <api_token> [minimo_noticias]')
+    if len(sys.argv) < 5:
+        print('Uso: python -m kobo.subir_a_kobo <noticias_procesadas.xlsx> <alertas.xlsx> <api_token> <username_kobo> [minimo_noticias] [form_id_noticias] [form_id_metricas]')
         sys.exit(1)
 
     ruta_noticias = sys.argv[1]
     ruta_alertas_arg = sys.argv[2]
     token = sys.argv[3]
-    minimo = int(sys.argv[4]) if len(sys.argv) > 4 else 10
+    username_arg = sys.argv[4]
+    minimo = int(sys.argv[5]) if len(sys.argv) > 5 else 10
+    form_id_noticias = sys.argv[6] if len(sys.argv) > 6 else FORM_ID_NOTICIAS
+    form_id_metricas = sys.argv[7] if len(sys.argv) > 7 else FORM_ID_METRICAS
 
-    pipeline_completo(ruta_noticias, ruta_alertas_arg, token, minimo_noticias=minimo)
+    pipeline_completo(
+        ruta_noticias,
+        ruta_alertas_arg,
+        token,
+        username_arg,
+        minimo_noticias=minimo,
+        form_id_noticias=form_id_noticias,
+        form_id_metricas=form_id_metricas,
+    )

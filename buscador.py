@@ -12,8 +12,7 @@ import unicodedata
 import openpyxl
 import pandas as pd
 from multiprocessing import Process
-from datetime import timedelta
-import datetime
+from datetime import datetime, timedelta
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -29,10 +28,32 @@ from webdriver_manager.chrome import ChromeDriverManager
 from urllib.parse import quote_plus
 from urllib.parse import urlparse
 
+
 # ---------------- CONFIGURACIÓN ----------------
-USE_MULTIPLE_BROWSERS = True   # True -> usar multiprocessing con N navegadores
-NUM_BROWSERS = 4               # cuántos navegadores/procesos quieres lanzar
-GROUP_START_INDEX = 0         # índice en 'grupos' desde donde iniciar (ej: 'comite' está en 13 en tu lista)
+
+def _cargar_config_scraper(ruta_config=None):
+    """
+    Carga la sección 'scraper' de env_prod.json. Si no se indica ruta,
+    busca env_prod.json en la misma carpeta que este script. Si el archivo
+    no existe, se usan los valores por defecto embebidos abajo (para poder
+    seguir probando el scraper suelto sin depender del JSON).
+    """
+    if ruta_config is None:
+        ruta_config = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'env_prod.json')
+
+    if os.path.exists(ruta_config):
+        with open(ruta_config, encoding='utf-8') as f:
+            return json.load(f).get('scraper', {})
+
+    print(f'ADVERTENCIA: no se encontró {ruta_config}; usando configuración por defecto embebida en el script.')
+    return {}
+
+
+_CFG = _cargar_config_scraper()
+
+USE_MULTIPLE_BROWSERS = True                          # True -> usar multiprocessing con N navegadores
+NUM_BROWSERS = _CFG.get('num_browsers', 4)            # cuántos navegadores/procesos quieres lanzar
+GROUP_START_INDEX = _CFG.get('group_start_index', 0)  # índice en MEDIOS_VENEZUELA desde donde iniciar
 
 PROXY_ROTATION_PAGES = 5   # (queda definido pero no lo usamos)
 
@@ -42,44 +63,94 @@ MAX_DELAY_BETWEEN_PAGES = 5.6
 SEARCH_ENGINE = 'duckduckgo'    # Opción: 'google' o 'duckduckgo'
 
 # Rutas base (las rutas finales por worker tendrán sufijo _part{i})
-RUTA_CARPETA = r'c:/Users/ACER/Desktop/Minado_noticias'
-RUTA_EXCEL_BASE = os.path.join(RUTA_CARPETA, 'ddg_noticias_vzla_OPEN.xlsx')
+CARPETA_RAIZ_PROYECTO = os.path.dirname(os.path.abspath(__file__))
+RUTA_CARPETA = _CFG.get('carpeta_base', CARPETA_RAIZ_PROYECTO)
+RUTA_EXCEL_BASE = os.path.join(RUTA_CARPETA, 'ddg_noticias_OPEN.xlsx')
 RUTA_PROGRESO_BASE = os.path.join(RUTA_CARPETA, 'progreso_busqueda.json')
 os.makedirs(RUTA_CARPETA, exist_ok=True)
 
-REGION_GL = 've'
+REGION_GL = _CFG.get('region_gl', 've')
 FORCE_SITE_VE = False
 SOCIAL = False
-
-hoy = datetime.date.today()
 
 # ---------------- FILTRO DE FECHAS ----------------
 # Nota: Google acepta nativamente 'after:YYYY-MM-DD before:YYYY-MM-DD' en el texto.
 # DuckDuckGo prefiere parámetros en la URL, pero incluirlo en la query ayuda a perfilar.
-USAR_FECHAS = True
-FECHA_DESDE = '2026-07-03'
-FECHA_HASTA = '2026-07-04'
+USAR_FECHAS = _CFG.get('usar_fechas', True)
 
-FECHA_DESDE = '2026-06-25'
-FECHA_HASTA = '2026-07-09' 
+if _CFG.get('fecha_desde') and _CFG.get('fecha_hasta'):
+    # Fechas fijas, indicadas explícitamente en env_prod.json (útil para pruebas
+    # o para reprocesar un rango de fechas específico).
+    FECHA_DESDE = _CFG['fecha_desde']
+    FECHA_HASTA = _CFG['fecha_hasta']
+else:
+    # Sin fechas fijas en la config -> ventana relativa a HOY, para que las
+    # corridas automáticas (ejecutar_pipeline.py) no necesiten que alguien
+    # actualice fechas a mano cada vez. 'ventana_dias' debería coincidir con
+    # (o ser un poco mayor que) la ventana de horas que usa metricas_alerta.py.
+    _ventana_dias = _CFG.get('ventana_dias', 2)
+    _hoy = datetime.now().date()
+    FECHA_DESDE = (_hoy - timedelta(days=_ventana_dias)).strftime('%Y-%m-%d')
+    FECHA_HASTA = _hoy.strftime('%Y-%m-%d')
+
+# ---------------- SITUACIÓN A SENSAR (tipo de evento de la corrida) --------
+# Palabras clave por tipo de evento. 'situacion' en env_prod.json elige cuál
+# se usa en esta corrida. Deben mantenerse alineadas con los tipos
+# canónicos de procesamiento/metricas_alerta.py (MAPA_EVENTO_CANONICO):
+# lluvias, sismo, sequia, huracan.
+KEYWORDS_POR_EVENTO = {
+    'lluvias': (
+        '(lluvia OR crecida OR inundacion OR deslizamiento OR desbord OR aguacero OR '
+        'draga OR precipitacion OR vaguada OR tormenta OR damnificados OR afectados)'
+    ),
+    'sismo': (
+        '(sismo OR terremoto OR temblor OR temblando OR replica OR "escala de richter" OR '
+        'desplom OR colapso OR damnificados OR evacuados OR heridos OR afectados)'
+    ),
+    'sequia': (
+        '(sequia OR "escasez de agua" OR "racionamiento de agua" OR "nivel de embalse" OR '
+        '"nivel del embalse" OR "cosechas perdidas" OR "incendios forestales")'
+    ),
+    'huracan': (
+        '(huracan OR "tormenta tropical" OR ciclon OR "onda tropical" OR '
+        '"vientos huracanados" OR "fuertes vientos" OR marejada)'
+    ),
+}
+
+SITUACION = _CFG.get('situacion', 'lluvias')
+if SITUACION not in KEYWORDS_POR_EVENTO:
+    raise ValueError(
+        f"'situacion'='{SITUACION}' en env_prod.json no es válida. "
+        f'Opciones válidas: {list(KEYWORDS_POR_EVENTO.keys())}'
+    )
+
+KEYWORDS_LLUVIAS = KEYWORDS_POR_EVENTO[SITUACION]
 
 # ---------------- DICCIONARIOS Y GRUPOS PARA EL BARRIDO ----------------
 
-# Palabras clave relacionadas con el evento (Agrupadas con OR para reducir queries)
-KEYWORDS_LLUVIAS = (
-    '(lluvia OR crecida OR inundacion OR deslizamiento OR desbord OR '
-    'draga OR precipitacion OR vaguada OR tormenta OR damnificados OR afectados)'
-)
-
-# Medios de comunicación de Venezuela (puedes usar sus nombres o sus dominios ej: site:el-nacional.com)
-MEDIOS_VENEZUELA = [
-    'El Nacional', 'El Universal', 'Últimas Noticias', 'El Diario', 'La Patilla', 
-    'TalCual', 'Efecto Cocuyo', 'Diario Vea', 'Diario La Nación', 'Noticia al Día'
+# Medios de comunicación de Venezuela. Se pueden sobreescribir completos desde
+# env_prod.json ("scraper.medios"); si no está la clave, se usa esta lista
+# por defecto (10 nacionales + 14 regionales/locales de mayor circulación,
+# verificados por estado, sin repetir ninguno).
+MEDIOS_VENEZUELA = _CFG.get('medios') or [
+    # Nacionales
+    'El Nacional', 'El Universal', 'Últimas Noticias', 'El Diario', 'La Patilla',
+    'TalCual', 'Efecto Cocuyo', 'Diario Vea', 'Diario La Nación', 'Diario 2001',
+    # Regionales / locales de mayor circulación (sin repetir los de arriba)
+    'Panorama', 'Versión Final',                  # Zulia
+    'El Impulso', 'El Informador',                # Lara
+    'El Carabobeño', 'Notitarde',                 # Carabobo
+    'El Siglo', 'El Periodiquito',                # Aragua
+    'Correo del Caroní', 'El Diario de Guayana',  # Bolívar
+    'Diario Los Andes',                           # Táchira / Mérida
+    'Sol de Margarita',                           # Nueva Esparta
+    'La Región',                                  # Miranda
+    'Noticia al Día',                             # Zulia (ya existía en tu lista original)
 ]
 
-ESTADOS_VENEZUELA = [
-    'amazonas', 'apure', 'aragua', 'barinas', 'bolivar', 'carabobo', 'cojedes', 'delta amacuro', 
-    'distrito capital', 'falcon', 'guarico', 'lara', 'la guaira', 'merida', 'miranda', 'monagas', 
+ESTADOS_VENEZUELA = _CFG.get('estados') or [
+    'amazonas', 'apure', 'aragua', 'barinas', 'bolivar', 'carabobo', 'cojedes', 'delta amacuro',
+    'distrito capital', 'falcon', 'guarico', 'lara', 'la guaira', 'merida', 'miranda', 'monagas',
     'nueva esparta', 'portuguesa', 'sucre', 'tachira', 'trujillo', 'yaracuy', 'zulia'
 ]
 
@@ -90,16 +161,16 @@ EXCLUSION = ' -filetype:pdf -filetype:doc -filetype:xls -scribd'
 
 def generar_queries_lluvias(lista_medios, lista_estados, rango_fechas=None):
     res = []
-    
-    # Estructura de la query: 
-    # venezuela "Nombre del Medio" "Nombre del Estado" (lluvia OR inundacion...) after:YYYY-MM-DD before:YYYY-MM-DD
+
+    # Estructura de la query:
+    # venezuela "Nombre del Medio" "Nombre del Estado" (palabras clave de la situación) after:YYYY-MM-DD before:YYYY-MM-DD
     for medio in lista_medios:
         for estado in lista_estados:
             query_base = f'venezuela "{medio}" "{estado}" {KEYWORDS_LLUVIAS}{EXCLUSION}'
-            
+
             if rango_fechas:
                 query_base += f' after:{rango_fechas[0]} before:{rango_fechas[1]}'
-                
+
             res.append(query_base)
     return res
 
@@ -114,7 +185,7 @@ fechas_filtro = (FECHA_DESDE, FECHA_HASTA) if USAR_FECHAS else None
 
 # Generación final
 queries_total = generar_queries_lluvias(medios_trabajo, ESTADOS_VENEZUELA, fechas_filtro)
-queries_total = queries_total[:5] 
+print(f"Situación a sensar: {SITUACION}")
 print(f"Total queries generadas para el barrido: {len(queries_total)}")
 print(f"Ejemplo de Query 1: {queries_total[0]}")
 

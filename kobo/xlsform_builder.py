@@ -9,7 +9,6 @@ Genera los dos XLSForm que se importan manualmente en KoboToolbox
 Los choices de 'estado' se generan desde diccionarios.ESTADOS para que
 coincidan exactamente con lo que usa el resto del pipeline. Los choices de
 'tipo_evento' coinciden con MAPA_EVENTO_CANONICO de metricas_alerta.py
-
 (hoy: sismo, inundacion, deslave, lluvias — sequía y huracán quedan
 pendientes hasta que se agreguen sus palabras clave en diccionarios.py).
 
@@ -18,6 +17,7 @@ Uso:
 Genera ambos archivos en la carpeta actual.
 """
 
+import os
 import unicodedata
 
 import openpyxl
@@ -63,6 +63,9 @@ def _hoja_choices_comun(wb):
 
 
 def generar_xlsform_noticias(ruta_salida='xlsforms/noticias_emergencia_vzla.xlsx'):
+    directorio = os.path.dirname(ruta_salida)
+    if directorio:
+        os.makedirs(directorio, exist_ok=True)
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
 
@@ -80,9 +83,10 @@ def generar_xlsform_noticias(ruta_salida='xlsforms/noticias_emergencia_vzla.xlsx
     _escribir_hoja(wb, 'survey', ['type', 'name', 'label'], survey)
     _hoja_choices_comun(wb)
     _escribir_hoja(
-        wb, 'settings',
-        ['form_title', 'form_id'],
-        [['Noticias de Emergencia - Cruz Roja Venezolana', 'noticias_emergencia_vzla']],
+        wb,
+        'settings',
+        ['form_title', 'form_id', 'version'],
+        [['noticias_emergencia_vzla', 'noticias_emergencia_vzla', '1.0']],
     )
 
     wb.save(ruta_salida)
@@ -90,6 +94,9 @@ def generar_xlsform_noticias(ruta_salida='xlsforms/noticias_emergencia_vzla.xlsx
 
 
 def generar_xlsform_metricas_alerta(ruta_salida='xlsforms/metricas_alerta_vzla.xlsx'):
+    directorio = os.path.dirname(ruta_salida)
+    if directorio:
+        os.makedirs(directorio, exist_ok=True)
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
 
@@ -110,15 +117,38 @@ def generar_xlsform_metricas_alerta(ruta_salida='xlsforms/metricas_alerta_vzla.x
     _escribir_hoja(wb, 'survey', ['type', 'name', 'label'], survey)
     _hoja_choices_comun(wb)
     _escribir_hoja(
-        wb, 'settings',
-        ['form_title', 'form_id'],
-        [['Métricas de Alerta - Cruz Roja Venezolana', 'metricas_alerta_vzla']],
+        wb,
+        'settings',
+        ['form_title', 'form_id', 'version'],
+        [['metricas_alerta_vzla', 'metricas_alerta_vzla', '1.0']],
     )
 
     wb.save(ruta_salida)
     print(f'Generado: {ruta_salida}')
 
 
+def validar_xlsform(ruta):
+    wb = openpyxl.load_workbook(ruta, data_only=True)
+
+    print("\nValidación XLSForm")
+    print("------------------")
+
+    for hoja in ['survey', 'choices', 'settings']:
+        if hoja not in wb.sheetnames:
+            print(f'ERROR: falta hoja {hoja}')
+            continue
+
+        ws = wb[hoja]
+
+        print(f'\nHoja: {hoja}')
+        print(f'Filas: {ws.max_row}')
+        print(f'Columnas: {ws.max_column}')
+
+        for fila in ws.iter_rows(values_only=True):
+            print(fila)
+
+
 if __name__ == '__main__':
     generar_xlsform_noticias()
     generar_xlsform_metricas_alerta()
+    validar_xlsform('xlsforms/noticias_emergencia_vzla.xlsx')

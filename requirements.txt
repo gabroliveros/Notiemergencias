@@ -1,0 +1,16 @@
+# Scraper (buscador.py)
+pandas
+openpyxl
+selenium
+selenium-stealth
+webdriver-manager
+
+# Procesamiento (procesamiento/limpieza_clasificacion.py)
+unidecode
+
+# Kobo (kobo/gestionar_formularios.py, kobo/subir_a_kobo.py)
+requests
+
+# Modelo de idioma para NER en español, se instala aparte con:
+#   spacy
+#   python -m spacy download es_core_news_lg

@@ -5,19 +5,25 @@ procesado por limpieza_clasificacion.py. La salida de este módulo es lo que
 se sube a KoboToolbox (subir_a_kobo.py, pendiente) para que el tablero de
 Power BI solo tenga que leer y mostrar, sin recalcular nada.
 
-Reglas de alerta:
-  - Ventana de tiempo:  últimas 48 horas (parámetro configurable).
-  - Agregación:         por estado y tipo de evento canónico.
-  - Rojo:               hay mención de víctimas, confirmada por >= 2 fuentes distintas.
-  - Naranja:            hay rescate activo o daños estructurales mencionados (>=1 fuente).
-  - Amarillo:           >= 2 noticias sobre el evento, sin víctimas/rescate/daños confirmados.
-  - Verde:              1 sola noticia, sin señales de impacto. Informativo, no dispara acción.
+Reglas de alerta (definidas junto con el usuario):
+  - Ventana de tiempo: últimas 48 horas (parámetro configurable).
+  - Agregación: por estado y tipo de evento canónico.
+  - Rojo:     hay mención de víctimas, confirmada por >= 2 fuentes distintas.
+  - Naranja:  hay rescate activo o daños estructurales mencionados (>=1 fuente).
+  - Amarillo: >= 2 noticias sobre el evento, sin víctimas/rescate/daños confirmados.
+  - Verde:    1 sola noticia, sin señales de impacto. Informativo, no dispara acción.
+
+Nota sobre el mapeo de tipos de evento: se define aquí un mapeo propio
+(MAPA_EVENTO_CANONICO) en vez de reutilizar EQUIVALENCIAS_FRECUENCIA de
+diccionarios.py, porque esa tabla usa raíces truncadas ('tembl', 'tiembla')
+que en el notebook original nunca hacían match real (el código compara con
+igualdad exacta, no con substring) — solo servía para los reportes
+descriptivos exploratorios, no es apta para decidir niveles de alerta.
+Si quieres, en algún momento corregimos también esa tabla en diccionarios.py.
 """
 
 from urllib.parse import urlparse
-
 import pandas as pd
-
 from procesamiento.diccionarios import ESTADOS
 
 VENTANA_HORAS_DEFAULT = 48
@@ -30,6 +36,10 @@ MAPA_EVENTO_CANONICO = {
     'deslave': 'deslave', 'derrumbe': 'deslave', 'deslizamiento': 'deslave', 'alud': 'deslave', 'barro': 'deslave',
     'aguacero': 'lluvias', 'tormenta': 'lluvias', 'precipitaciones': 'lluvias', 'vaguada': 'lluvias',
     'lluvia': 'lluvias', 'onda tropical': 'lluvias',
+    'sequia': 'sequia', 'racionamiento': 'sequia', 'escasez de agua': 'sequia',
+    'embalses bajos': 'sequia', 'nivel de embalses': 'sequia',
+    'huracan': 'huracan', 'tormenta tropical': 'huracan', 'ciclon': 'huracan',
+    'vientos huracanados': 'huracan', 'marejada': 'huracan',
 }
 
 _ESTADOS_ORDENADOS = sorted(ESTADOS, key=len, reverse=True)  # más largos primero (ej: "la guaira" antes que "la")
@@ -67,7 +77,25 @@ def canonicalizar_eventos(lista_eventos):
     return sorted(canonicos)
 
 
-def preparar_dataframe_alertas(df):
+def filtrar_eventos_por_situacion(lista_eventos, situacion):
+    """
+    Devuelve solamente eventos relacionados con la situación activa.
+    """
+    grupos = {'lluvias': {'lluvias', 'inundacion', 'deslave', 'inundacion', 'onda tropical', 
+                          'crecida', 'preciptaciones', 'desbordamiento', 'anegacion', 
+                          'deslizamiento', 'vaguada', 'aguacero', 'chuvasco', 'llovizna'}, 
+              'sismo'  : {'sismo', 'terremoto', 'temblor', 'escala de richter', 'derrumbe', 
+                          'colapso'}, 
+              'sequia' : {'sequia', 'estrés hidrico', 'deshidratacion', 'desierto'}, 
+              'huracan': {'huracan', 'huracanados', 'ventarron', 'tornado', 'rafagas de viento', 
+                          'ventisca'}}
+
+    permitidos = grupos.get(situacion, set())
+
+    return [evento for evento in lista_eventos if evento in permitidos]
+
+
+def preparar_dataframe_alertas(df, situacion=None):
     """
     Agrega columnas 'estado' y 'tipo_evento' y explota por tipo_evento
     (un registro que menciona lluvias E inundación cuenta para ambos grupos).
@@ -77,6 +105,11 @@ def preparar_dataframe_alertas(df):
     df['estado'] = df['criterio_busqueda'].apply(extraer_estado)
     df['dominio'] = df['url'].apply(extraer_dominio)
     df['tipo_evento'] = df['eventos'].apply(canonicalizar_eventos)
+
+    if situacion:
+        df['tipo_evento'] = df['tipo_evento'].apply(
+            lambda x: filtrar_eventos_por_situacion(x, situacion)
+        )
 
     sin_estado = df['estado'].isna().sum()
     if sin_estado:
@@ -105,7 +138,7 @@ def _clasificar_nivel(grupo):
     return 'Verde'
 
 
-def calcular_metricas_alerta(df, ventana_horas=VENTANA_HORAS_DEFAULT, ahora=None):
+def calcular_metricas_alerta(df, ventana_horas=VENTANA_HORAS_DEFAULT, ahora=None, situacion=None):
     """
     Calcula, por (estado, tipo_evento), las métricas y el nivel de alerta
     dentro de la ventana de tiempo indicada.
@@ -117,7 +150,7 @@ def calcular_metricas_alerta(df, ventana_horas=VENTANA_HORAS_DEFAULT, ahora=None
     ahora = ahora or pd.Timestamp.now()
     limite = ahora - pd.Timedelta(hours=ventana_horas)
 
-    df_prep = preparar_dataframe_alertas(df)
+    df_prep = preparar_dataframe_alertas(df, situacion)
 
     sin_fecha = df_prep['fecha_dt'].isna().sum()
     if sin_fecha:
@@ -154,7 +187,7 @@ def calcular_metricas_alerta(df, ventana_horas=VENTANA_HORAS_DEFAULT, ahora=None
     return resultado.reset_index(drop=True)
 
 
-def pipeline_completo(ruta_excel_procesado, ruta_excel_salida, ventana_horas=VENTANA_HORAS_DEFAULT):
+def pipeline_completo(ruta_excel_procesado, ruta_excel_salida, ventana_horas=VENTANA_HORAS_DEFAULT, situacion=None):
     df = pd.read_excel(ruta_excel_procesado)
 
     # Las columnas de listas (eventos, victimas, rescate, daños) se guardan
@@ -167,7 +200,7 @@ def pipeline_completo(ruta_excel_procesado, ruta_excel_salida, ventana_horas=VEN
     if 'fecha_dt' in df.columns:
         df['fecha_dt'] = pd.to_datetime(df['fecha_dt'], errors='coerce')
 
-    resultado = calcular_metricas_alerta(df, ventana_horas=ventana_horas)
+    resultado = calcular_metricas_alerta(df, ventana_horas=ventana_horas, situacion=situacion)
     resultado.to_excel(ruta_excel_salida, index=False)
     print(f'Guardado: {ruta_excel_salida} ({len(resultado)} filas de alerta)')
     return resultado
@@ -196,7 +229,7 @@ def _reconstruir_lista(valor):
 if __name__ == '__main__':
     import sys
 
-    entrada = sys.argv[1] if len(sys.argv) > 1 else 'noticias_vzla_lluvias_procesada.xlsx'
+    entrada = sys.argv[1] if len(sys.argv) > 1 else 'noticias_procesadas.xlsx'
     salida = sys.argv[2] if len(sys.argv) > 2 else 'alertas_por_estado.xlsx'
     ventana = int(sys.argv[3]) if len(sys.argv) > 3 else VENTANA_HORAS_DEFAULT
 

@@ -1,7 +1,8 @@
 env_prod.json
-   logs/
-
+descargas/
+logs/
 originales/
+xlsforms/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

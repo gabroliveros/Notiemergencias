@@ -3,11 +3,22 @@
 Ejecuta el pipeline completo de forma automática:
   scraper -> unir_partes -> limpieza_clasificacion -> metricas_alerta -> subir_a_kobo
 
-Cada fase queda registrada en un log (consola + archivo en logs/), con
+Cada fase queda registrada en un log (consola + archivo en descargas/logs/), con
 timestamp de inicio/fin y traceback completo si falla. Si una fase falla,
 las siguientes NO se ejecutan (cada una depende del resultado de la anterior)
 y el proceso termina con código de salida distinto de 0 — útil para que un
 programador de tareas (cron / Task Scheduler) detecte el fallo.
+
+Carpeta de trabajo (`rutas.carpeta_descargas`, por defecto "descargas"):
+todos los CSV/xlsx/logs de una corrida viven ahí, para no ensuciar la raíz
+del proyecto. Al empezar, esa carpeta se limpia por completo — EXCEPTO si la
+corrida anterior fue de la misma 'situacion', el mismo día, y hace menos de
+`rutas.horas_reutilizar_descargas` horas (así una corrida que se corta a la
+mitad no pierde lo ya descargado si la vuelves a lanzar poco después).
+
+El registro de noticias ya enviadas a Kobo (`rutas.registro_envios_kobo`)
+vive FUERA de descargas/, a propósito: es memoria de largo plazo entre
+corridas para evitar reenvíos, no un archivo temporal de la corrida actual.
 
 IMPORTANTE: el despliegue/reemplazo de los formularios de Kobo
 (kobo.gestionar_formularios.upload_koboform) NO forma parte de este pipeline
@@ -21,16 +32,21 @@ Uso:
 
 import json
 import logging
+import os
+import shutil
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from procesamiento.unir_partes import pipeline_completo as unir_partes_pipeline
 from procesamiento.limpieza_clasificacion import pipeline_completo as limpieza_pipeline
 from procesamiento.metricas_alerta import pipeline_completo as metricas_pipeline
 from kobo.subir_a_kobo import pipeline_completo as subir_kobo_pipeline
+from kobo.gestionar_formularios import asegurar_formulario_desplegado
+
+NOMBRE_MARCADOR_CORRIDA = '.ultima_corrida.json'
 
 
 class FaseFallidaError(Exception):
@@ -48,7 +64,66 @@ def cargar_config(ruta='env_prod.json'):
     if config['kobo']['api_token'] in ('PON_AQUI_TU_API_TOKEN', '', None):
         raise ValueError(f"Falta configurar 'api_token' en {ruta} (todavía tiene el valor de plantilla).")
 
+    if config['kobo'].get('username') in ('PON_AQUI_TU_USUARIO_KOBO', '', None):
+        raise ValueError(f"Falta configurar 'kobo.username' en {ruta} (tu usuario de Kobo, el mismo de tu URL de bulk-submission-form).")
+
     return config
+
+
+def preparar_carpeta_descargas(config):
+    """
+    Prepara la carpeta de trabajo de esta corrida. La limpia por completo,
+    salvo que la corrida anterior haya sido de la misma 'situacion', el
+    mismo día, y hace menos de 'horas_reutilizar_descargas' horas — en ese
+    caso se conserva tal cual (para no perder progreso de una corrida
+    reciente cortada a la mitad).
+
+    Se ejecuta ANTES de configurar el logging (así el log de esta corrida,
+    que también vive dentro de esta carpeta, no se borra a sí mismo).
+    """
+    carpeta = config['rutas']['carpeta_descargas']
+    situacion = config['scraper']['situacion']
+    horas_reutilizar = config['rutas'].get('horas_reutilizar_descargas', 5)
+
+    os.makedirs(carpeta, exist_ok=True)
+    ruta_marcador = os.path.join(carpeta, NOMBRE_MARCADOR_CORRIDA)
+
+    reutilizar = False
+    if os.path.exists(ruta_marcador):
+        try:
+            with open(ruta_marcador, encoding='utf-8') as f:
+                marca = json.load(f)
+            timestamp_anterior = datetime.fromisoformat(marca['timestamp'])
+            horas_transcurridas = (datetime.now() - timestamp_anterior).total_seconds() / 3600
+            mismo_dia = marca.get('fecha') == datetime.now().strftime('%Y-%m-%d')
+            misma_situacion = marca.get('situacion') == situacion
+
+            if mismo_dia and misma_situacion and horas_transcurridas < horas_reutilizar:
+                reutilizar = True
+                print(f"[{carpeta}] Se reutiliza: misma situación ('{situacion}'), mismo día, "
+                      f'última corrida hace {horas_transcurridas:.1f}h (< {horas_reutilizar}h).')
+        except Exception as e:
+            print(f'[{carpeta}] Marcador de corrida ilegible ({e}) — se limpia la carpeta por seguridad.')
+
+    if not reutilizar:
+        print(f"[{carpeta}] Limpiando (corrida nueva, distinta situación/día, o pasaron más de {horas_reutilizar}h).")
+        for nombre in os.listdir(carpeta):
+            ruta_item = os.path.join(carpeta, nombre)
+            try:
+                if os.path.isdir(ruta_item):
+                    shutil.rmtree(ruta_item)
+                else:
+                    os.remove(ruta_item)
+            except Exception as e:
+                print(f'[{carpeta}] No se pudo borrar {ruta_item}: {e}')
+
+    with open(ruta_marcador, 'w', encoding='utf-8') as f:
+        json.dump(
+            {'situacion': situacion, 'fecha': datetime.now().strftime('%Y-%m-%d'), 'timestamp': datetime.now().isoformat()},
+            f,
+        )
+
+    return carpeta
 
 
 def configurar_logging(carpeta_logs):
@@ -94,11 +169,25 @@ def ejecutar_fase(logger, nombre_fase, funcion, *args, **kwargs):
 
 def ejecutar_scraper(logger, config):
     """Corre el scraper como subproceso aparte (usa multiprocessing propio)
-    y vuelca toda su salida al log, línea por línea."""
+    y vuelca toda su salida al log, línea por línea.
+
+    Se fuerza PYTHONIOENCODING=utf-8 en el entorno del subproceso: por
+    defecto, cuando la salida de un proceso hijo en Windows se captura por
+    un pipe (en vez de ir a una consola real), Python usa cp1252 en lugar
+    de UTF-8 — y cp1252 no puede codificar los emojis que imprime el
+    scraper (🔎, etc.), lo que lo hacía morir antes de escribir cualquier
+    resultado."""
     script = config['rutas']['scraper_script']
     logger.info(f'Lanzando scraper como subproceso: {script}')
 
-    resultado = subprocess.run([sys.executable, script], capture_output=True, text=True)
+    entorno = os.environ.copy()
+    entorno['PYTHONIOENCODING'] = 'utf-8'
+
+    resultado = subprocess.run(
+        [sys.executable, script],
+        capture_output=True, text=True, encoding='utf-8', errors='replace',
+        env=entorno,
+    )
 
     for linea in resultado.stdout.splitlines():
         logger.info(f'[scraper] {linea}')
@@ -109,39 +198,90 @@ def ejecutar_scraper(logger, config):
         raise RuntimeError(f'El scraper terminó con código de salida {resultado.returncode}')
 
 
+def _asegurar_ambos_formularios(logger, kobo_cfg):
+    """Crea en Kobo los formularios que falten (solo la primera vez). Si ya
+    existen, no los toca — nunca borra datos ya subidos."""
+    for nombre_xlsform, form_id in [
+        (kobo_cfg['form_id_noticias'], kobo_cfg['form_id_noticias']),
+        (kobo_cfg['form_id_metricas'], kobo_cfg['form_id_metricas']),
+    ]:
+        creado, _ = asegurar_formulario_desplegado(
+            nombre_xlsform, form_id, kobo_cfg['api_token'], server=kobo_cfg['server']
+        )
+        if creado:
+            logger.info(f"Formulario '{form_id}' no existía — se creó y desplegó ahora.")
+        else:
+            logger.info(f"Formulario '{form_id}' ya existía — sin cambios, solo se subirán datos.")
+
+
 def main(ruta_config='env_prod.json'):
     config = cargar_config(ruta_config)
-    logger, ruta_log = configurar_logging(config['rutas']['carpeta_logs'])
-    logger.info(f'Iniciando pipeline completo. Log de esta corrida: {ruta_log}')
+
+    # Se prepara ANTES del logging: el log de esta corrida vive dentro de
+    # esta misma carpeta, no queremos que la limpieza se lo lleve.
+    carpeta = preparar_carpeta_descargas(config)
+
+    logger, ruta_log = configurar_logging(os.path.join(carpeta, 'logs'))
+    logger.info(f'Iniciando pipeline completo. Carpeta de trabajo: {carpeta} | Log: {ruta_log}')
 
     rutas = config['rutas']
     parametros = config['parametros']
     kobo_cfg = config['kobo']
 
-    try:
-        ejecutar_fase(logger, 'scraper', ejecutar_scraper, logger, config)
+    ruta_noticias_crudas = os.path.join(carpeta, rutas['noticias_crudas'])
+    ruta_noticias_procesadas = os.path.join(carpeta, rutas['noticias_procesadas'])
+    ruta_alertas = os.path.join(carpeta, rutas['alertas'])
+    # Fuera de 'carpeta' a propósito — ver docstring del módulo.
+    ruta_registro_envios = rutas['registro_envios_kobo']
 
-        ejecutar_fase(
-            logger, 'unir_partes',
-            unir_partes_pipeline, rutas['carpeta_base'], rutas['noticias_crudas'],
-        )
+    scraper_cfg = config['scraper']
+    if scraper_cfg.get('usar_fechas', True):
+        if scraper_cfg.get('fecha_desde') and scraper_cfg.get('fecha_hasta'):
+            fecha_desde = scraper_cfg['fecha_desde']
+            fecha_hasta = scraper_cfg['fecha_hasta']
+        else:
+            hoy = datetime.now()
+            fecha_hasta = hoy.strftime('%Y-%m-%d')
+            fecha_desde = (hoy - timedelta(days=scraper_cfg['ventana_dias'])).strftime('%Y-%m-%d')
+    else:
+        fecha_desde = fecha_hasta = None
+
+    try:
+        # ejecutar_fase(logger, 'scraper', ejecutar_scraper, logger, config)
+
+        # ejecutar_fase(
+        #     logger, 'unir_partes',
+        #     unir_partes_pipeline, carpeta, ruta_noticias_crudas, rutas['csv_base'] + '_part*.csv',
+        # )
 
         ejecutar_fase(
             logger, 'limpieza_clasificacion',
-            limpieza_pipeline, rutas['noticias_crudas'], rutas['noticias_procesadas'],
+            limpieza_pipeline, ruta_noticias_crudas, ruta_noticias_procesadas,
+            fecha_desde=fecha_desde, fecha_hasta=fecha_hasta,
         )
-
+        
         ejecutar_fase(
             logger, 'metricas_alerta',
-            metricas_pipeline, rutas['noticias_procesadas'], rutas['alertas'],
-            ventana_horas=parametros['ventana_horas_alerta'],
+            metricas_pipeline, ruta_noticias_procesadas, ruta_alertas,
+            ventana_horas=parametros['ventana_horas_alerta'], situacion=config['scraper']['situacion']
+        )
+
+        # No borra ni recrea nada si el formulario ya existe — solo lo crea
+        # la primera vez que no lo encuentra en Kobo.
+        ejecutar_fase(
+            logger, 'verificar_formularios_kobo',
+            _asegurar_ambos_formularios, logger, kobo_cfg,
         )
 
         ejecutar_fase(
             logger, 'subir_a_kobo',
-            subir_kobo_pipeline, rutas['noticias_procesadas'], rutas['alertas'],
-            kobo_cfg['api_token'], minimo_noticias=parametros['minimo_noticias_a_subir'],
-            ruta_registro_envios=rutas['registro_envios_kobo'],
+            subir_kobo_pipeline, ruta_noticias_procesadas, ruta_alertas,
+            kobo_cfg['api_token'], kobo_cfg['username'], 
+            situacion=config['scraper']['situacion'],
+            minimo_noticias=parametros['minimo_noticias_a_subir'],
+            form_id_noticias=kobo_cfg['form_id_noticias'],
+            form_id_metricas=kobo_cfg['form_id_metricas'],
+            ruta_registro_envios=ruta_registro_envios,
         )
 
         logger.info('=== PIPELINE COMPLETO: TODAS LAS FASES OK ===')

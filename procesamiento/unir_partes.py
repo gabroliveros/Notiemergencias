@@ -1,8 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-    Compila los CSV que genera cada worker del scraper (uno por proceso, ver
-    RUTA_CSV en prebusqueda_multinavegador_emergencia.py) en un único xlsx
-    acumulado, y lo fusiona con las corridas anteriores sin duplicar registros.
+Compila los CSV que genera cada worker del scraper (uno por proceso, ver
+RUTA_CSV en prebusqueda_multinavegador_emergencia.py) en un único xlsx
+acumulado, y lo fusiona con las corridas anteriores sin duplicar registros.
+
+Traducción a módulo de unir_partes_csv.ipynb, con una diferencia importante:
+el notebook original asumía siempre exactamente 4 archivos ('_part1' a
+'_part4' hardcodeados). Como el número de workers (NUM_BROWSERS) cambia entre
+corridas, aquí se detectan automáticamente todos los '_part*.csv' presentes
+en la carpeta — así no se queda ningún worker sin compilar si corriste con
+2, 4, o cualquier otro número de procesos.
 """
 
 import glob
@@ -11,7 +18,7 @@ import os
 import pandas as pd
 
 # Debe coincidir con RUTA_CSV en el scraper: <base>_part{worker_id}.csv
-PATRON_PARTES_DEFAULT = 'ddg_noticias_vzla_OPEN_part*.csv'
+PATRON_PARTES_DEFAULT = 'ddg_noticias_OPEN_part*.csv'
 
 
 def encontrar_archivos_partes(carpeta, patron=PATRON_PARTES_DEFAULT):
@@ -59,6 +66,12 @@ def cargar_y_unir_partes(rutas_csv):
     # Columna residual que a veces aparece en encabezados mal formados del CSV
     df_unido = df_unido.drop(columns=['_collected_at;;'], errors='ignore')
 
+    # displayed_url/snippet/rich_type llegan vacías o redundantes (snippet
+    # es el mismo texto truncado que ya está completo en snippet_full) —
+    # se descartan aquí, en el primer punto donde se persiste el archivo
+    # acumulado, para que ningún archivo posterior del pipeline las cargue.
+    df_unido = df_unido.drop(columns=['displayed_url', 'snippet', 'rich_type'], errors='ignore')
+
     print('Total unido (sin duplicados):', df_unido.shape, df_unido.columns.tolist())
     return df_unido
 
@@ -105,7 +118,7 @@ if __name__ == '__main__':
     import sys
 
     carpeta_entrada = sys.argv[1] if len(sys.argv) > 1 else '.'
-    archivo_salida = sys.argv[2] if len(sys.argv) > 2 else 'noticias_vzla_lluvias.xlsx'
+    archivo_salida = sys.argv[2] if len(sys.argv) > 2 else 'noticias_crudas.xlsx'
 
     resultado = pipeline_completo(carpeta_entrada, archivo_salida)
     print(f'\nListo: {resultado.shape[0]} registros totales en {archivo_salida}')
