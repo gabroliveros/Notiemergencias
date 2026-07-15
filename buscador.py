@@ -53,7 +53,7 @@ _CFG = _cargar_config_scraper()
 
 USE_MULTIPLE_BROWSERS = True                          # True -> usar multiprocessing con N navegadores
 NUM_BROWSERS = _CFG.get('num_browsers', 4)            # cuántos navegadores/procesos quieres lanzar
-GROUP_START_INDEX = _CFG.get('group_start_index', 0)  # índice en MEDIOS_VENEZUELA desde donde iniciar
+GROUP_START_INDEX = _CFG.get('group_start_index', 0)  # índice en MEDIOS_COMUNICACION desde donde iniciar
 
 PROXY_ROTATION_PAGES = 5   # (queda definido pero no lo usamos)
 
@@ -101,11 +101,10 @@ else:
 KEYWORDS_POR_EVENTO = {
     'lluvias': (
         '(lluvia OR crecida OR inundacion OR deslizamiento OR desbord OR aguacero OR '
-        'draga OR precipitacion OR vaguada OR tormenta OR damnificados OR afectados)'
+        'precipitacion OR vaguada OR tormenta)'
     ),
     'sismo': (
-        '(sismo OR terremoto OR temblor OR temblando OR replica OR "escala de richter" OR '
-        'desplom OR colapso OR damnificados OR evacuados OR heridos OR afectados)'
+        '(sismo OR terremoto OR temblor OR temblando OR replica OR "escala de richter")'
     ),
     'sequia': (
         '(sequia OR "escasez de agua" OR "racionamiento de agua" OR "nivel de embalse" OR '
@@ -113,83 +112,68 @@ KEYWORDS_POR_EVENTO = {
     ),
     'huracan': (
         '(huracan OR "tormenta tropical" OR ciclon OR "onda tropical" OR '
-        '"vientos huracanados" OR "fuertes vientos" OR marejada)'
+        'huracanados OR "fuertes vientos")'
     ),
 }
 
-SITUACION = _CFG.get('situacion', 'lluvias')
-if SITUACION not in KEYWORDS_POR_EVENTO:
-    raise ValueError(
-        f"'situacion'='{SITUACION}' en env_prod.json no es válida. "
-        f'Opciones válidas: {list(KEYWORDS_POR_EVENTO.keys())}'
-    )
+SITUACIONES_CONFIG = _CFG.get('situacion')
 
-KEYWORDS_LLUVIAS = KEYWORDS_POR_EVENTO[SITUACION]
+if isinstance(SITUACIONES_CONFIG, str):
+    situaciones_a_procesar = [SITUACIONES_CONFIG]
+elif isinstance(SITUACIONES_CONFIG, list):
+    situaciones_a_procesar = SITUACIONES_CONFIG
 
-# ---------------- DICCIONARIOS Y GRUPOS PARA EL BARRIDO ----------------
+for sit in situaciones_a_procesar:
+    if sit not in KEYWORDS_POR_EVENTO:
+        raise ValueError(
+            f"La situación '{sit}' en env_prod.json no es válida. "
+            f"Opciones válidas: {list(KEYWORDS_POR_EVENTO.keys())}"
+        )
 
-# Medios de comunicación de Venezuela. Se pueden sobreescribir completos desde
-# env_prod.json ("scraper.medios"); si no está la clave, se usa esta lista
-# por defecto (10 nacionales + 14 regionales/locales de mayor circulación,
-# verificados por estado, sin repetir ninguno).
-MEDIOS_VENEZUELA = _CFG.get('medios') or [
-    # Nacionales
-    'El Nacional', 'El Universal', 'Últimas Noticias', 'El Diario', 'La Patilla',
-    'TalCual', 'Efecto Cocuyo', 'Diario Vea', 'Diario La Nación', 'Diario 2001',
-    # Regionales / locales de mayor circulación (sin repetir los de arriba)
-    'Panorama', 'Versión Final',                  # Zulia
-    'El Impulso', 'El Informador',                # Lara
-    'El Carabobeño', 'Notitarde',                 # Carabobo
-    'El Siglo', 'El Periodiquito',                # Aragua
-    'Correo del Caroní', 'El Diario de Guayana',  # Bolívar
-    'Diario Los Andes',                           # Táchira / Mérida
-    'Sol de Margarita',                           # Nueva Esparta
-    'La Región',                                  # Miranda
-    'Noticia al Día',                             # Zulia (ya existía en tu lista original)
-]
+keywords_combinadas = []
+for sit in situaciones_a_procesar:
+    kw = KEYWORDS_POR_EVENTO[sit].strip()
+    if kw.startswith('(') and kw.endswith(')'):
+        kw = kw[1:-1]
+    keywords_combinadas.append(kw)
 
-ESTADOS_VENEZUELA = _CFG.get('estados') or [
-    'amazonas', 'apure', 'aragua', 'barinas', 'bolivar', 'carabobo', 'cojedes', 'delta amacuro',
-    'distrito capital', 'falcon', 'guarico', 'lara', 'la guaira', 'merida', 'miranda', 'monagas',
-    'nueva esparta', 'portuguesa', 'sucre', 'tachira', 'trujillo', 'yaracuy', 'zulia'
-]
-
-# Exclusiones para limpiar ruido de formatos no deseados
+KEYWORDS_ = "(" + " OR ".join(keywords_combinadas) + ")"
+MEDIOS_COMUNICACION = _CFG.get('medios')
+SITE = _CFG.get('site', 've')
 EXCLUSION = ' -filetype:pdf -filetype:doc -filetype:xls -scribd'
 
-# ---------------- GENERADOR DE QUERIES OPTIMIZADO ----------------
+# ---------------- GENERADOR DE QUERIES ----------------
 
-def generar_queries_lluvias(lista_medios, lista_estados, rango_fechas=None):
+def generar_queries(lista_medios, rango_fechas=None, site=False):
     res = []
-
     # Estructura de la query:
-    # venezuela "Nombre del Medio" "Nombre del Estado" (palabras clave de la situación) after:YYYY-MM-DD before:YYYY-MM-DD
+    # venezuela "Nombre del Medio" (palabras clave de la situación) after:YYYY-MM-DD before:YYYY-MM-DD
     for medio in lista_medios:
-        for estado in lista_estados:
-            query_base = f'venezuela "{medio}" "{estado}" {KEYWORDS_LLUVIAS}{EXCLUSION}'
-
-            if rango_fechas:
-                query_base += f' after:{rango_fechas[0]} before:{rango_fechas[1]}'
-
-            res.append(query_base)
+        if site:
+            query_base = f'venezuela "{medio}" {KEYWORDS_}{EXCLUSION} site:{SITE}'
+        else:
+            query_base = f'venezuela "{medio}" {KEYWORDS_}{EXCLUSION}'
+        if rango_fechas:
+            query_base += f' after:{rango_fechas[0]} before:{rango_fechas[1]}'
+        res.append(query_base)
     return res
 
 # Control de índice de inicio para no repetir trabajo si se corta
-if GROUP_START_INDEX and 0 <= GROUP_START_INDEX < len(MEDIOS_VENEZUELA):
-    medios_trabajo = MEDIOS_VENEZUELA[GROUP_START_INDEX:]
+if GROUP_START_INDEX and 0 <= GROUP_START_INDEX < len(MEDIOS_COMUNICACION):
+    medios_trabajo = MEDIOS_COMUNICACION[GROUP_START_INDEX:]
 else:
-    medios_trabajo = MEDIOS_VENEZUELA[:]
+    medios_trabajo = MEDIOS_COMUNICACION[:]
 
 # Configuración del rango de fechas para la función
 fechas_filtro = (FECHA_DESDE, FECHA_HASTA) if USAR_FECHAS else None
 
 # Generación final
-queries_total = generar_queries_lluvias(medios_trabajo, ESTADOS_VENEZUELA, fechas_filtro)
-print(f"Situación a sensar: {SITUACION}")
+queries_total = generar_queries(medios_trabajo, fechas_filtro)
+print(f"Situaciones a sensar: {', '.join(situaciones_a_procesar)}")
 print(f"Total queries generadas para el barrido: {len(queries_total)}")
 print(f"Ejemplo de Query 1: {queries_total[0]}")
 
-# ---------------- RASPA POR RANGO DE FECHAS ---------------------------------------
+# ---------------- RASPADO POR RANGO DE FECHAS ---------------------------------------
 
 def generar_consultas_por_dia(start_date, end_date):
     consultas = []
@@ -517,8 +501,6 @@ def extraer_resultados_de_serp(driver, page_number, engine='duckduckgo'):
             if not bloques:
                 bloques = driver.find_elements(By.CSS_SELECTOR, ".results article, .nrn-react-div, .web-result")
                 print(f"DEBUG bloques encontrados (selector fallback): {len(bloques)}")
-            if not bloques:
-                print("DEBUG primeros 1500 caracteres del body:", driver.find_element(By.TAG_NAME, "body").get_attribute("innerHTML")[:1500])
             urls_vistas_pagina = set()
             rank = 1
             for b in bloques:
@@ -744,12 +726,6 @@ def ir_siguiente_pagina(driver, engine='google'):
                     show_all = None
 
                 if show_all and show_all.is_displayed():
-                    try:
-                        print("DEBUG show_all outerHTML:", show_all.get_attribute("outerHTML")[:500])
-                        print("DEBUG show_all visible/displayed:", show_all.is_displayed())
-                    except Exception as e:
-                        print("DEBUG error:", e)
-
                     try:
                         cur = (driver.current_url or "").lower()
                         # si la URL contiene un filtro site: (codificado o no), NO devolver el botón

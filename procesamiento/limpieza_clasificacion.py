@@ -22,7 +22,7 @@ Cambios respecto al notebook original (avisar si no se quieren):
 
 import re
 from collections import Counter
-
+from datetime import datetime, timedelta
 import pandas as pd
 from unidecode import unidecode
 
@@ -47,7 +47,11 @@ AFECTACION = ['daños', 'victimas', 'rescate']
 # (páginas genéricas, repos de GitHub, etc. que DDG devuelve como relleno
 # cuando ya no hay más resultados reales para esa query específica).
 PATRON_FECHA_INICIAL = re.compile(
-    r'^\s*\d{1,2}\s+(ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic)[a-z]*\.?\s+\d{4}',
+    r'^\s*(?:'
+    r'\d{1,2}\s+(?:ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic)[a-z]*\.?\s+\d{4}|' # Formato clásico
+    r'hace\s+\d+\s+(?:dia|hora|minuto)s?|'                                            # "hace 4 días", "hace 1 hora"
+    r'hace\s+un\s+(?:momento|instante)'                                              # "hace un momento"
+    r')',
     re.IGNORECASE,
 )
 
@@ -65,7 +69,9 @@ PATRON_DOMINIOS_EXCLUIDOS = (
     r'meteoblue\.com|'
     r'meteored\.com|'
     r'es\.weather-forecast\.com|'
-    r'weather-atlas\.com'
+    r'weather-atlas\.com|'
+    r'microsoft\.com|'
+    r'chiletrabajos\.'
 )
 
 def filtrar_snippets_con_fecha_inicial(df):
@@ -73,13 +79,14 @@ def filtrar_snippets_con_fecha_inicial(df):
     fecha reconocible. Descarta ruido como resultados genéricos o de
     repositorios sin relación, que DDG a veces devuelve sin fecha cuando ya
     no hay más resultados relevantes para una combinación medio/estado."""
+
     antes = len(df)
-    mask = df['snippet_full'].astype(str).str.match(PATRON_FECHA_INICIAL, na=False)
+    texto_normalizado = df['snippet_full'].astype(str).apply(unidecode)
+    mask = texto_normalizado.str.match(PATRON_FECHA_INICIAL, na=False)
     filtrado = df[mask].copy()
     print(f'Filtro de fecha inicial: {antes} -> {len(filtrado)} registros '
           f'(se descartaron {antes - len(filtrado)} sin fecha reconocible al inicio del snippet).')
     return filtrado
-
 
 # --------------------------------------------------------------------------
 # 1) Apertura y acondicionamiento
@@ -118,6 +125,32 @@ def normalizar_fecha(df):
     NUEVO respecto al notebook original — avisar si no se quiere.
     """
     df = df.copy()
+    
+    # Si la fecha viene como formato de texto relativo ("hace X días"), la calculamos de manera dinámica:
+    if 'fecha' in df.columns:
+        fecha_calculada = []
+        hoy = datetime.now()
+        
+        for val in df['fecha'].astype(str):
+            val_clean = val.lower().strip()
+            # Buscar coincidencia con "hace X días"
+            match_dias = re.search(r'hace\s+(\d+)\s+dia', val_clean)
+            # Buscar coincidencia con "hace X horas"
+            match_horas = re.search(r'hace\s+(\d+)\s+hora', val_clean)
+            
+            if match_dias:
+                dias = int(match_dias.group(1))
+                fecha_calculada.append((hoy - timedelta(days=dias)).strftime('%Y-%m-%d'))
+            elif match_horas:
+                horas = int(match_horas.group(1))
+                fecha_calculada.append((hoy - timedelta(hours=horas)).strftime('%Y-%m-%d'))
+            elif "hace" in val_clean: # ej: hace un momento, hace poco
+                fecha_calculada.append(hoy.strftime('%Y-%m-%d'))
+            else:
+                fecha_calculada.append(val) # si ya viene como YYYY-MM-DD
+                
+        df['fecha'] = fecha_calculada
+
     df['fecha_dt'] = pd.to_datetime(df.get('fecha'), format='%Y-%m-%d', errors='coerce')
     return df
 
@@ -131,6 +164,8 @@ def filtrar_ventana_fecha(df, fecha_desde=None, fecha_hasta=None):
         return df
 
     antes = len(df)
+    print(df[['fecha', 'fecha_dt']].head(20).to_string())
+    print(df['fecha'].value_counts(dropna=False))
     mask = df['fecha_dt'].notna()
     if fecha_desde is not None:
         mask &= df['fecha_dt'] >= pd.Timestamp(fecha_desde)
@@ -152,7 +187,15 @@ def filtrar_venezuela(df):
     mask_otros_paises = df['snippet_full_clean'].str.contains(AMER_PATTERN, case=False, na=False)
     return df[mask_vzla & ~mask_otros_paises]
 
+def filtrar_venezuela(df):
+    mask_vzla = df["snippet_full_clean"].str.contains(
+        VZLA_PATTERN,
+        case=False,
+        na=False,
+        regex=True,
+    )
 
+    return df[mask_vzla].copy()
 # --------------------------------------------------------------------------
 # 4) Clasificación: red social, zonas, afectación, logística
 # --------------------------------------------------------------------------
@@ -315,11 +358,12 @@ def pipeline_completo(ruta_excel_entrada, ruta_excel_salida, aplicar_ner=False, 
     """Ejecuta todo el flujo: carga -> filtro de fecha inicial -> limpieza
     -> filtrado geográfico -> clasificación -> (opcional) NER -> limpieza de
     entidades -> guardado."""
+    
     df = cargar_datos(ruta_excel_entrada)
     df = filtrar_snippets_con_fecha_inicial(df)
     df = limpiar_y_normalizar(df)
     df = normalizar_fecha(df)
-    df = filtrar_ventana_fecha(df, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta)
+    df = filtrar_ventana_fecha(df, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta,)
     df = filtrar_venezuela(df)
     df = clasificar_red_social(df)
     df = clasificar_categorias(df)

@@ -34,7 +34,9 @@ FORM_ID_METRICAS = 'metricas_alerta_vzla'
 
 ORDEN_NIVEL = {'Rojo': 0, 'Naranja': 1, 'Amarillo': 2, 'Verde': 3}
 
-RUTA_REGISTRO_ENVIOS_DEFAULT = 'noticias_enviadas_kobo.json'
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'env_prod.json'), encoding='utf-8') as f:
+    _CFG_RUTAS = json.load(f).get('rutas', {})
+RUTA_REGISTRO_ENVIOS_DEFAULT = _CFG_RUTAS.get('registro_envios_kobo')
 
 
 def cargar_registro_envios(ruta=RUTA_REGISTRO_ENVIOS_DEFAULT):
@@ -47,6 +49,7 @@ def cargar_registro_envios(ruta=RUTA_REGISTRO_ENVIOS_DEFAULT):
 
 
 def guardar_registro_envios(urls, ruta=RUTA_REGISTRO_ENVIOS_DEFAULT):
+    os.makedirs(os.path.dirname(ruta), exist_ok=True)
     with open(ruta, 'w', encoding='utf-8') as f:
         json.dump(sorted(urls), f, ensure_ascii=False, indent=2)
 
@@ -63,7 +66,7 @@ def enriquecer_noticias_con_alerta(df_noticias, df_alertas):
     evento reconocible.
     """
     df = df_noticias.copy()
-    df['estado'] = df['criterio_busqueda'].apply(extraer_estado)
+    df['estado'] = df['snippet_full_clean'].apply(extraer_estado)
     df['tipos_evento_canonico'] = df['eventos'].apply(canonicalizar_eventos)
     df = df[df['estado'].notna() & df['tipos_evento_canonico'].map(len).gt(0)].copy()
 
@@ -135,6 +138,13 @@ def preparar_fila_metrica(fila):
 # Pipeline completo
 # --------------------------------------------------------------------------
 
+def _situaciones_lista(situacion):
+    """Normaliza 'situacion' (puede venir como str, lista, o None) a una lista."""
+    if situacion is None:
+        return [None]
+    return [situacion] if isinstance(situacion, str) else list(situacion)
+
+
 def pipeline_completo(
     ruta_noticias_procesadas,
     ruta_alertas,
@@ -158,36 +168,48 @@ def pipeline_completo(
     if df_alertas.empty:
         print('El archivo de alertas está vacío — se subirán noticias relevantes sin nivel de alerta.')
 
-    df_alertas = pd.read_excel(ruta_alertas)
-    
-    if df_alertas.empty:
-        print('El archivo de alertas está vacío — se subirán noticias relevantes sin nivel de alerta.')
-
     if df_noticias.empty:
         print('No hay noticias relevantes en esta corrida — se omite el envío de noticias.')
         filas_noticias = []
         seleccion = df_noticias
     else:
-        # --- Noticias: se deduplican contra lo ya enviado en corridas anteriores ---
+        # Noticias: se procesan y seleccionan por separado para cada
+        # situación activa, para que ninguna le quite espacio a otra en el
+        # top de noticias a subir
         urls_ya_enviadas = cargar_registro_envios(ruta_registro_envios)
-        if situacion:
-            df_noticias['tipos_evento_canonico'] = df_noticias['eventos'].apply(canonicalizar_eventos)
+        df_noticias['tipos_evento_canonico'] = df_noticias['eventos'].apply(canonicalizar_eventos)
 
-            df_noticias = df_noticias[
-                df_noticias['tipos_evento_canonico'].apply(
-                    lambda x: len(filtrar_eventos_por_situacion(x, situacion)) > 0
-                )
-            ]
-        enriquecidas = enriquecer_noticias_con_alerta(df_noticias, df_alertas)
-        enriquecidas_nuevas = enriquecidas[~enriquecidas['url'].isin(urls_ya_enviadas)]
+        selecciones = []
+        for sit in _situaciones_lista(situacion):
+            if sit is not None:
+                df_situacion = df_noticias[
+                    df_noticias['tipos_evento_canonico'].apply(
+                        lambda x: len(filtrar_eventos_por_situacion(x, sit)) > 0
+                    )
+                ]
+            else:
+                df_situacion = df_noticias
 
-        omitidas = len(enriquecidas) - len(enriquecidas_nuevas)
-        if omitidas:
-            print(f'{omitidas} noticias de la ventana ya se habían subido en corridas anteriores — se omiten.')
+            if df_situacion.empty:
+                print(f"'{sit}': ninguna noticia de esta corrida menciona esta situación.")
+                continue
 
-        seleccion = seleccionar_noticias(enriquecidas_nuevas, minimo=minimo_noticias)
-        print(f'Noticias nuevas seleccionadas para subir: {len(seleccion)}')
+            enriquecidas = enriquecer_noticias_con_alerta(df_situacion, df_alertas)
+            enriquecidas_nuevas = enriquecidas[~enriquecidas['url'].isin(urls_ya_enviadas)]
 
+            omitidas = len(enriquecidas) - len(enriquecidas_nuevas)
+            if omitidas:
+                print(f"'{sit}': {omitidas} noticias ya se habían subido en corridas anteriores — se omiten.")
+
+            if enriquecidas_nuevas.empty:
+                print(f"'{sit}': sin noticias nuevas por subir en esta corrida.")
+                continue
+
+            seleccion_sit = seleccionar_noticias(enriquecidas_nuevas, minimo=minimo_noticias)
+            print(f"'{sit}': {len(seleccion_sit)} noticias seleccionadas para subir.")
+            selecciones.append(seleccion_sit)
+
+        seleccion = pd.concat(selecciones, ignore_index=True).drop_duplicates(subset='url') if selecciones else df_noticias.iloc[0:0]
         filas_noticias = [preparar_fila_noticia(fila) for _, fila in seleccion.iterrows()]
 
     # --- Métricas: SIN deduplicar, cada corrida agrega su snapshot (línea de tiempo) ---

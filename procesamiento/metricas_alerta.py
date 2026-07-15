@@ -90,7 +90,10 @@ def filtrar_eventos_por_situacion(lista_eventos, situacion):
               'huracan': {'huracan', 'huracanados', 'ventarron', 'tornado', 'rafagas de viento', 
                           'ventisca'}}
 
-    permitidos = grupos.get(situacion, set())
+    situaciones = [situacion] if isinstance(situacion, str) else list(situacion)
+    permitidos = set()
+    for sit in situaciones:
+        permitidos |= grupos.get(sit, set())
 
     return [evento for evento in lista_eventos if evento in permitidos]
 
@@ -102,7 +105,7 @@ def preparar_dataframe_alertas(df, situacion=None):
     Descarta registros sin estado o sin tipo de evento reconocido.
     """
     df = df.copy()
-    df['estado'] = df['criterio_busqueda'].apply(extraer_estado)
+    df['estado'] = df['snippet_full_clean'].apply(extraer_estado)
     df['dominio'] = df['url'].apply(extraer_dominio)
     df['tipo_evento'] = df['eventos'].apply(canonicalizar_eventos)
 

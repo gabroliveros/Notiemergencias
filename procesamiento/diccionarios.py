@@ -20,9 +20,15 @@ EMERGENCIAS = {
     'urbanizacion': ['urbanizacion', 'residencias', 'edificio', 'condominio', 'quinta', 'calle', 'avenida', 'conjunto'],
 
     # Nivel de afectación / consecuencias
-    'daños': ['daño', 'destruccion', 'colapso', 'escombros', 'perdida', 'ruina', 'afectacion', 'grieta', 'desplome', 'siniestro', 'viviendas afectadas'],
-    'victimas': ['victima', 'fallecido', 'muerto', 'herido', 'lesionado', 'desaparecido', 'damnificado', 'cadaver', 'atrapado', 'deceso'],
-    'rescate': ['rescate', 'salvamento', 'evacuacion', 'bomberos', 'proteccion civil', 'paramedicos', 'busqueda', 'sobreviviente', 'inparques', 'voluntarios'],
+    'daños': ['daño', 'destruccion', 'colapso', 'escombros', 'perdida', 'ruina', 'afectacion', 'grieta', 
+              'desplome', 'siniestro', 'viviendas afectadas', 'inundacion', 'anegacion', 'anegamiento', 
+              'crecida', 'deslave', 'derrumbe', 'alud', 'desborde', 'desbordamiento', 'viviendas inundadas', 
+              'viviendas afectadas', 'casas afectadas', 'colapso', 'socavacion'],
+    'victimas': ['victima', 'fallecido', 'fallecida', 'muerto', 'herido', 'lesionado', 'desaparecido', 'damnificado', 
+                 'cadaver', 'atrapado', 'deceso', 'afectado', 'familias afectadas', 'personas afectadas', 
+                 'evacuados', 'evacuadas', 'desalojados', 'desalojadas', 'reubicados', 'reubicadas', 'sobreviviente'],
+    'rescate': ['rescate', 'salvamento', 'evacuacion', 'bomberos', 'proteccion civil', 'paramedicos', 
+                'busqueda', 'voluntarios'],
 
     # Atención, salud y refugio
     'atencion': ['refugio', 'albergue', 'cancha', 'iglesia', 'hospital', 'clinica', 'cdi', 'ambulatorio', 'carpa', 'campamento', 'triaje', 'acopio', 'donacion', 'insumos', 'medicinas', 'alimentos', 'agua potable'],
@@ -84,9 +90,9 @@ OTROS_LUGARES_NO_VZLA = (
 
 EXTRA_RUIDO = (
     r'shop| tienda|trabajo|empleo|vacante|contratamos|postula| curso| clase| beca|inscripci[oó]n|'
-    r'chavismo|oposici[oó]n|elecciones|protest|manifest|notici|asesin| robo|secuestr| herido|balacera|'
-    r'accident|emergencia|sexo|porn| eroti|sensual|concierto|[aá]lbum|periodico|unlimited|4x2|4x4|'
-    r'multiventas|repuestos| envio|todo jeep|envios maritimos|expobici|endoparasitos|resonancia'
+    r'chavismo|oposici[oó]n|elecciones|protest|manifest|asesin| robo|secuestr|balacera|sexo|'
+    r'porn| eroti|sensual|concierto|[aá]lbum|unlimited|4x2|4x4|multiventas|repuestos| envio|'
+    r'todo jeep|envios maritimos|expobici|endoparasitos|resonancia'
 )
 
 # --------------------------------------------------------------------------

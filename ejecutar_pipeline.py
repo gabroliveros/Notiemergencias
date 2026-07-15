@@ -46,6 +46,9 @@ from procesamiento.metricas_alerta import pipeline_completo as metricas_pipeline
 from kobo.subir_a_kobo import pipeline_completo as subir_kobo_pipeline
 from kobo.gestionar_formularios import asegurar_formulario_desplegado
 
+
+tiempo_inicio = time.time()
+
 NOMBRE_MARCADOR_CORRIDA = '.ultima_corrida.json'
 
 
@@ -247,12 +250,12 @@ def main(ruta_config='env_prod.json'):
         fecha_desde = fecha_hasta = None
 
     try:
-        # ejecutar_fase(logger, 'scraper', ejecutar_scraper, logger, config)
+        ejecutar_fase(logger, 'scraper', ejecutar_scraper, logger, config)
 
-        # ejecutar_fase(
-        #     logger, 'unir_partes',
-        #     unir_partes_pipeline, carpeta, ruta_noticias_crudas, rutas['csv_base'] + '_part*.csv',
-        # )
+        ejecutar_fase(
+            logger, 'unir_partes',
+            unir_partes_pipeline, carpeta, ruta_noticias_crudas, rutas['csv_base'] + '_part*.csv',
+        )
 
         ejecutar_fase(
             logger, 'limpieza_clasificacion',
@@ -285,6 +288,15 @@ def main(ruta_config='env_prod.json'):
         )
 
         logger.info('=== PIPELINE COMPLETO: TODAS LAS FASES OK ===')
+
+        tiempo_fin = time.time()
+        tiempo_total = tiempo_fin - tiempo_inicio # Tiempo total en segundos
+        
+        # Formatear el tiempo en minutos y segundos
+        minutos = int(tiempo_total // 60)
+        segundos = int(tiempo_total % 60)
+        print(f"⏱️  Tiempo total de ejecución: {minutos} min {segundos} seg")
+
         return 0
 
     except FaseFallidaError as e:
