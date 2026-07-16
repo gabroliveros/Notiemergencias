@@ -1,4 +1,6 @@
-import requests
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+import requests, time
 import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
@@ -9,52 +11,160 @@ from kobo.xlsform_builder import nombre_choice
 
 # 1. FUNCIONES DE PROCESAMIENTO
 
-def consultar_acumulado_ciudad(estado_clave, info, fecha_inicio, fecha_fin):
-    """Realiza la petición HTTP y calcula el acumulado y nivel de riesgo."""
+def consultar_acumulado_ciudad(
+    estado_clave,
+    info,
+    fecha_inicio,
+    fecha_fin,
+    anios_historicos=10,
+    normal_minimo_mm=15,
+    umbral_amarillo_pct=1.25,
+    umbral_naranja_pct=1.70,
+    umbral_rojo_pct=2.20,
+):
+    """Calcula el riesgo relativo de una capital comparando la lluvia
+    acumulada actual contra su 'normal histórico':
 
-    url = f"https://archive-api.open-meteo.com/v1/archive?latitude={info['lat']}&longitude={info['lon']}&start_date={fecha_inicio}&end_date={fecha_fin}&daily=precipitation_sum&timezone=auto"
-    try:
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            lluvias = data['daily']['precipitation_sum']
-            acumulado = sum(lluvias) if lluvias else 0.0
+        riesgo_relativo = acumulado_ventana / normal_historico_ventana
 
-            if acumulado >= info['umbral_rojo']:
-                alerta, color, prioridad = "ROJO", "red", 4
-            elif acumulado >= info['umbral_naranja']:
-                alerta, color, prioridad = "NARANJA", "orange", 3
-            elif acumulado >= info['umbral_amarillo']:
-                alerta, color, prioridad = "AMARILLO", "gold", 2
+    normal_historico_ventana = mediana de la lluvia acumulada en la MISMA
+    ventana de fechas (mismo día/mes) de cada uno de los `anios_historicos`
+    años anteriores. Se usa mediana en vez de promedio para que un evento
+    extremo puntual en el histórico no distorsione el "normal".
+
+    `normal_minimo_mm` evita ratios absurdos en temporada seca, cuando el
+    normal histórico es casi 0mm (cualquier lluvia daría un % gigante).
+
+    Se hace UN solo request cubriendo todo el rango (hoy - anios_historicos
+    años, hasta hoy) y las ventanas se recortan localmente con pandas, en
+    vez de un request por año.
+    """
+    fecha_inicio_ts = pd.Timestamp(fecha_inicio)
+    fecha_fin_ts = pd.Timestamp(fecha_fin)
+    rango_inicio = (fecha_inicio_ts - pd.DateOffset(years=anios_historicos)).date()
+
+    url = (
+        f"https://archive-api.open-meteo.com/v1/archive?"
+        f"latitude={info['lat']}&longitude={info['lon']}"
+        f"&start_date={rango_inicio}&end_date={fecha_fin}"
+        f"&daily=precipitation_sum&timezone=auto"
+    )
+
+    max_reintentos = 4
+    backoff_factor = 2  # Segundos a esperar multiplicados en cada fallo (2s, 4s, 8s...)
+    response = None
+
+    for intento in range(max_reintentos):
+        try:
+            if intento == 0:
+                time.sleep(hash(estado_clave) % 10 / 10.0) 
+
+            response = requests.get(url, timeout=25)
+            
+            if response.status_code == 200:
+                break
+                
+            elif response.status_code == 429:
+                espera = backoff_factor ** (intento + 1)
+                print(f"⚠️ [Rate Limit] {estado_clave.upper()} devolvió 429. Reintentando en {espera}s... (Intento {intento+1}/{max_reintentos})")
+                time.sleep(espera)
             else:
-                alerta, color, prioridad = "VERDE", "green", 1
+                espera = backoff_factor ** (intento + 1)
+                print(f"⚠️ [Error HTTP {response.status_code}] en {estado_clave.upper()}. Reintentando en {espera}s...")
+                time.sleep(espera)
 
-            porcentaje_saturacion = (acumulado / info['umbral_rojo']) * 100
+        except (requests.exceptions.RequestException, Exception) as e:
+            espera = backoff_factor ** (intento + 1)
+            print(f"❌ [Fallo de Red] en {estado_clave.upper()}: {str(e)}. Reintentando en {espera}s... (Intento {intento+1}/{max_reintentos})")
+            time.sleep(espera)
+    
+    if response is None or response.status_code != 200:
+        print(f"🚨 [ERROR DEFINITIVO] No se pudieron recuperar los datos de precipitación para {estado_clave.upper()} tras {max_reintentos} intentos.")
+        return None
 
-            return {
-                "estado": estado_clave,
-                "capital": info['capital'],
-                "acumulado": acumulado,
-                "alerta": alerta,
-                "color": color,
-                "prioridad": prioridad,
-                "saturacion": porcentaje_saturacion,
-                "umbral_amarillo": info['umbral_amarillo'],
-                "umbral_naranja": info['umbral_naranja'],
-                "umbral_rojo": info['umbral_rojo'],
-                "df_historico": pd.DataFrame({
-                    'Fecha': pd.to_datetime(data['daily']['time']),
-                    'Lluvia_Diaria_mm': lluvias
-                }) if 'time' in data['daily'] else None
-            }
+    try:
+        data = response.json()
+        if 'time' not in data.get('daily', {}):
+            return None
+
+        lluvias = [v if v is not None else 0.0 for v in data['daily']['precipitation_sum']]
+        df = pd.DataFrame({
+            'Fecha': pd.to_datetime(data['daily']['time']),
+            'Lluvia_Diaria_mm': lluvias,
+        }).set_index('Fecha')
+
+        # Acumulado de la ventana actual (ej. últimos 30 días)
+        ventana_actual = df.loc[fecha_inicio_ts:fecha_fin_ts, 'Lluvia_Diaria_mm']
+        acumulado = float(ventana_actual.sum())
+
+        # Acumulados de la MISMA ventana (mismo día/mes) en años anteriores
+        normales = []
+        for k in range(1, anios_historicos + 1):
+            ini_hist = fecha_inicio_ts - pd.DateOffset(years=k)
+            fin_hist = fecha_fin_ts - pd.DateOffset(years=k)
+            ventana_hist = df.loc[ini_hist:fin_hist, 'Lluvia_Diaria_mm']
+            if not ventana_hist.empty:
+                normales.append(float(ventana_hist.sum()))
+
+        if not normales:
+            return None
+
+        normal = round(float(pd.Series(normales).median()), 2)
+        normal_efectivo = max(normal, normal_minimo_mm)
+        riesgo_relativo = round(acumulado / normal_efectivo, 2)
+
+        if riesgo_relativo >= umbral_rojo_pct:
+            alerta, color, prioridad = "ROJO", "red", 4
+        elif riesgo_relativo >= umbral_naranja_pct:
+            alerta, color, prioridad = "NARANJA", "orange", 3
+        elif riesgo_relativo >= umbral_amarillo_pct:
+            alerta, color, prioridad = "AMARILLO", "gold", 2
+        else:
+            alerta, color, prioridad = "VERDE", "green", 1
+
+        return {
+            "estado": estado_clave,
+            "capital": info['capital'],
+            "acumulado": round(acumulado, 2),
+            "normal_historico": round(normal, 2),
+            "anios_historicos_usados": len(normales),
+            "alerta": alerta,
+            "color": color,
+            "prioridad": prioridad,
+            # "saturacion" ahora es el % del normal histórico (antes era % de un umbral fijo)
+            "saturacion": round(riesgo_relativo * 100, 2),
+            # se mantienen estas columnas (mismo esquema para Kobo) pero ahora
+            # son umbrales en mm DERIVADOS del normal histórico de cada capital,
+            # no valores fijos escritos a mano
+            "umbral_amarillo": round(normal_efectivo * umbral_amarillo_pct,2),
+            "umbral_naranja": round(normal_efectivo * umbral_naranja_pct, 2),
+            "umbral_rojo": round(normal_efectivo * umbral_rojo_pct, 2),
+            "df_historico": ventana_actual.reset_index() if not ventana_actual.empty else None,
+        }
     except Exception:
         pass
     return None
 
 
-def escanear_riesgo_nacional(ventana_dias=30, estados=None):
+def escanear_riesgo_nacional(
+    ventana_dias=30,
+    estados=None,
+    anios_historicos=10,
+    normal_minimo_mm=15,
+    umbral_amarillo_pct=1.25,
+    umbral_naranja_pct=1.70,
+    umbral_rojo_pct=2.20,
+):
     """Escanea concurrentemente las capitales configuradas en
-    env_prod.json['precipitacion']['estados']."""
+    env_prod.json['precipitacion']['estados'].
+
+    El riesgo ya no se mide contra un umbral fijo en mm por estado, sino
+    contra el 'normal histórico' de cada capital (mediana de los últimos
+    `anios_historicos` años en la misma ventana de fechas):
+
+        riesgo_relativo = acumulado / normal_historico
+        Amarillo > umbral_amarillo_pct | Naranja > umbral_naranja_pct | Rojo > umbral_rojo_pct
+    """
     if estados is None:
         raise ValueError(
             "Falta 'estados' (ver la sección 'precipitacion.estados' de env_prod.json)."
@@ -63,12 +173,23 @@ def escanear_riesgo_nacional(ventana_dias=30, estados=None):
     fecha_fin = datetime.now().date()
     fecha_inicio = fecha_fin - timedelta(days=ventana_dias)
 
-    print("\nIniciando escaneo nacional de seguridad hídrica...")
+    print("\nIniciando escaneo nacional de seguridad hídrica (riesgo relativo al normal histórico)...")
     resultados = []
 
     with ThreadPoolExecutor(max_workers=12) as executor:
         futuros = [
-            executor.submit(consultar_acumulado_ciudad, estado_clave, info, fecha_inicio, fecha_fin)
+            executor.submit(
+                consultar_acumulado_ciudad,
+                estado_clave,
+                info,
+                fecha_inicio,
+                fecha_fin,
+                anios_historicos,
+                normal_minimo_mm,
+                umbral_amarillo_pct,
+                umbral_naranja_pct,
+                umbral_rojo_pct,
+            )
             for estado_clave, info in estados.items()
         ]
         for f in futuros:
@@ -81,9 +202,8 @@ def escanear_riesgo_nacional(ventana_dias=30, estados=None):
 
     en_riesgo = df_riesgos[df_riesgos['prioridad'] > 1]
 
-    print("\n" + "="*70)
     print("      REPORTE NACIONAL DE RIESGO HIDROLÓGICO (MAYOR A MENOR PELIGRO)      ")
-    print("="*70)
+    print("="*60)
 
     if en_riesgo.empty:
         print("  🟢 EXCELENTES NOTICIAS: No se detectan capitales en niveles de riesgo.")
@@ -92,16 +212,16 @@ def escanear_riesgo_nacional(ventana_dias=30, estados=None):
         for _, row in en_riesgo.iterrows():
             simbolo = "🔴" if row['alerta'] == "ROJO" else "🟠" if row['alerta'] == "NARANJA" else "🟡"
             print(f" {simbolo} Alerta {row['alerta']}: {row['capital']} (Edo. {row['estado']})")
-            print(f"    - Lluvia acum. {ventana_dias} días: {row['acumulado']:.1f} mm")
-            print(f"    - Saturación de Suelos: {row['saturacion']:.1f}% de su capacidad crítica")
-            print("-" * 70)
+            print(f"    - Lluvia acum. {ventana_dias} días: {row['acumulado']:.1f} mm  (normal histórico: {row['normal_historico']:.1f} mm, {row['anios_historicos_usados']} años)")
+            print(f"    - Riesgo relativo: {row['saturacion']:.0f}% de su normal histórico")
+            print("-" * 60)
 
     total_rojo = len(df_riesgos[df_riesgos['alerta'] == "ROJO"])
     total_naranja = len(df_riesgos[df_riesgos['alerta'] == "NARANJA"])
     total_amarillo = len(df_riesgos[df_riesgos['alerta'] == "AMARILLO"])
     print(f"\nResumen de alertas activas a nivel nacional:")
     print(f" - Alertas Rojas: {total_rojo} | Alertas Naranjas: {total_naranja} | Alertas Amarillas: {total_amarillo}")
-    print("="*70 + "\n")
+    print("="*60 + "\n")
 
     df_kobo = df_riesgos.copy()
     df_kobo["fecha_calculo"] = datetime.now()
@@ -199,6 +319,11 @@ if __name__ == "__main__":
     df = escanear_riesgo_nacional(
         ventana_dias=_cfg_precip["ventana_dias"],
         estados=_cfg_precip["estados"],
+        anios_historicos=_cfg_precip.get("anios_historicos", 10),
+        normal_minimo_mm=_cfg_precip.get("normal_minimo_mm", 15),
+        umbral_amarillo_pct=_cfg_precip.get("umbral_amarillo_pct", 1.25),
+        umbral_naranja_pct=_cfg_precip.get("umbral_naranja_pct", 1.70),
+        umbral_rojo_pct=_cfg_precip.get("umbral_rojo_pct", 2.20),
     )
     df.to_excel("descargas/precipitacion_nacional.xlsx", index=False)
     print("\nArchivo generado: descargas/precipitacion_nacional.xlsx")

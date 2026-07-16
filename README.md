@@ -48,9 +48,10 @@ Flujo paralelo (hidrológico, independiente de las noticias):
    un nivel de alerta (Rojo/Naranja/Amarillo/Verde).
 5. **Precipitación nacional** (`OpenMeteo/openmeteo.py`): consulta, en paralelo, la
    lluvia acumulada de los últimos 30 días en la capital de cada uno de los 24
-   estados contra la API histórica de Open-Meteo, y calcula un nivel de alerta
-   hidrológico por estado según umbrales propios de cada región. Es independiente del
-   flujo de noticias — no depende del scraper ni de la clasificación.
+   estados contra la API histórica de Open-Meteo. Compara este acumulado con la 
+   mediana histórica del mismo periodo de tiempo en los últimos $N$ años para 
+   calcular dinámicamente un nivel de alerta hidrológico por estado. Es independiente 
+   del flujo de noticias — no depende del scraper ni de la clasificación.
 6. **KoboToolbox** (`kobo/`): crea los tres formularios en Kobo la primera vez (si no
    existen) y sube las noticias relevantes, las métricas de alerta y el snapshot de
    precipitación nacional como respuestas, sin borrar nunca el histórico — cada corrida
@@ -259,13 +260,20 @@ si hay víctimas/rescate/daños mencionados, fecha más reciente, y el nivel de 
 (ver regla abajo).
 
 ### 5. Precipitación nacional (hidrológico)
-Consulta en paralelo (`ThreadPoolExecutor`) la API histórica de Open-Meteo para las 24
-capitales de estado, sumando la precipitación diaria de los últimos 30 días. Cada
-estado tiene sus propios umbrales de `amarillo`/`naranja`/`rojo` en `CAPITALES_VE`
-(zonas áridas o andinas toleran menos agua acumulada que las zonas selváticas), y se
-calcula además un porcentaje de saturación respecto al umbral rojo. El resultado se
-normaliza al formato que espera Kobo (`estado` como *choice name*, `nivel_alerta` en
-minúscula) antes de enviarse.
+Consulta en paralelo (`ThreadPoolExecutor`) la API histórica de Open-Meteo para las 24 
+capitales de estado. Para optimizar el tráfico de red, realiza una sola petición 
+multianual por ciudad (desde hoy hasta hace $N$ años atrás). 
+
+Procesa de forma local:
+1. El acumulado real de precipitación de los últimos 30 días.
+2. La mediana de la lluvia acumulada en esa misma ventana de 30 días del calendario equivalente para cada uno de los últimos $N$ años anteriores (`normal_historico_30dias`). Se utiliza la mediana para evitar que un evento extremo puntual distorsione la métrica.
+
+A partir de allí, se calcula el **riesgo relativo**:
+$$\text{riesgo\_relativo} = \frac{\text{acumulado\_30dias}}{\max(\text{normal\_historico\_30dias}, \text{normal\_minimo\_mm})}$$
+
+El parámetro `normal_minimo_mm` (piso mínimo) actúa como un escudo en temporada de sequía para evitar falsas alertas por variaciones insignificantes (por ejemplo, que 5 mm de lluvia generen alertas extremas sobre un histórico normal de 0.5 mm).
+
+La métrica de **saturación** representa el *% respecto al normal histórico*. 
 
 ### 6. KoboToolbox
 - **Formularios**: se crean automáticamente la primera vez que no existen
@@ -298,16 +306,14 @@ de un solo medio dispare una alerta máxima.
 
 ### Precipitación (por estado, ventana de 30 días)
 
-| Nivel | Condición |
-|---|---|
-| 🔴 **Rojo** | Lluvia acumulada ≥ umbral rojo del estado |
-| 🟠 **Naranja** | Lluvia acumulada ≥ umbral naranja del estado |
-| 🟡 **Amarillo** | Lluvia acumulada ≥ umbral amarillo del estado |
-| 🟢 **Verde** | Por debajo del umbral amarillo |
+| Nivel | Condición | % del Normal Histórico (Configurable) |
+|---|---|---|
+| 🔴 **Rojo** | Acumulado actual $\ge$ normal histórico × multiplicador rojo | $> 220\%$ |
+| 🟠 **Naranja** | Acumulado actual $\ge$ normal histórico × multiplicador naranja | $> 170\%$ |
+| 🟡 **Amarillo** | Acumulado actual $\ge$ normal histórico × multiplicador amarillo | $> 125\%$ |
+| 🟢 **Verde** | Por debajo del umbral amarillo | $\le 125\%$ |
 
-Los umbrales son propios de cada estado (definidos en `CAPITALES_VE`, dentro de
-`OpenMeteo/openmeteo.py`) y no se cruzan con los de noticias — son dos señales
-independientes que el tablero de Power BI puede comparar entre sí.
+Los umbrales y la sensibilidad de este análisis se configuran de manera global en el archivo `env_prod.json` mediante los parámetros `anios_historicos`, `normal_minimo_mm` y los multiplicadores de alerta `umbral_*_pct`, adaptando la severidad de forma dinámica a la realidad climatológica histórica de cada capital. No se cruzan con las alertas de noticias — son dos señales independientes que el tablero de Power BI puede comparar entre sí.
 
 ## KoboToolbox: formularios y datos
 
@@ -343,7 +349,8 @@ En Windows, usa el **Programador de Tareas** apuntando a:
 - Argumentos: `ejecutar_pipeline.py`
 - Iniciar en: la carpeta raíz del proyecto
 
-Frecuencia sugerida: cada 12-24h, alineada con `ventana_dias` del scraper y
+Frecuencia sugerida: Realiza una carga inicial con ventana de 30 o 60 días y 
+luego fíjala en 12-24h, alineada con `ventana_dias` del scraper y
 `ventana_horas_alerta` de las métricas. El escaneo de precipitación corre en cada
 ejecución del pipeline (no tiene una frecuencia propia distinta).
 
