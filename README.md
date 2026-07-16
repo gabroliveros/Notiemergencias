@@ -269,7 +269,11 @@ Procesa de forma local:
 2. La mediana de la lluvia acumulada en esa misma ventana de 30 días del calendario equivalente para cada uno de los últimos $N$ años anteriores (`normal_historico_30dias`). Se utiliza la mediana para evitar que un evento extremo puntual distorsione la métrica.
 
 A partir de allí, se calcula el **riesgo relativo**:
-$$\text{riesgo\_relativo} = \frac{\text{acumulado\_30dias}}{\max(\text{normal\_historico\_30dias}, \text{normal\_minimo\_mm})}$$
+$$
+\mathrm{riesgo\_relativo}=
+\frac{\mathrm{acumulado\_30dias}}
+{\max(\mathrm{normal\_historico\_30dias},\mathrm{normal\_minimo\_mm})}
+$$
 
 El parámetro `normal_minimo_mm` (piso mínimo) actúa como un escudo en temporada de sequía para evitar falsas alertas por variaciones insignificantes (por ejemplo, que 5 mm de lluvia generen alertas extremas sobre un histórico normal de 0.5 mm).
 

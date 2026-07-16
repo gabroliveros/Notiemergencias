@@ -66,7 +66,7 @@ def consultar_acumulado_ciudad(
                 
             elif response.status_code == 429:
                 espera = backoff_factor ** (intento + 1)
-                print(f"⚠️ [Rate Limit] {estado_clave.upper()} devolvió 429. Reintentando en {espera}s... (Intento {intento+1}/{max_reintentos})")
+                # print(f"⚠️ [Rate Limit] {estado_clave.upper()} devolvió 429. Reintentando en {espera}s... (Intento {intento+1}/{max_reintentos})")
                 time.sleep(espera)
             else:
                 espera = backoff_factor ** (intento + 1)
