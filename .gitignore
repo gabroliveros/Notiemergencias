@@ -1,5 +1,6 @@
 env_prod.json
 descargas/*
+kobo/logs/*
 originales/*
 xlsforms/*
 
