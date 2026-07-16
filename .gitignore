@@ -1,6 +1,7 @@
 env_prod.json
 descargas/*
-kobo/logs/*
+kobo/logs/alertas_enviadas_kobo.json
+kobo/logs/noticias_enviadas_kobo.json
 originales/*
 xlsforms/*
 
