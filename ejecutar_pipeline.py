@@ -295,7 +295,11 @@ def main(ruta_config='env_prod.json'):
         )
 
         # Escaner de Precipitaciones Acumuladas de OpenMeteo
-        df_precipitacion = ejecutar_fase(logger, 'escanear_precipitacion', escanear_riesgo_nacional)
+        df_precipitacion = ejecutar_fase(
+            logger, 'escanear_precipitacion', escanear_riesgo_nacional,
+            ventana_dias=config['precipitacion']['ventana_dias'],
+            estados=config['precipitacion']['estados'],
+        )
 
         ejecutar_fase(
             logger, 'subir_precipitacion_kobo',
