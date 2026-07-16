@@ -48,15 +48,22 @@ def upload_koboform(file, server=SERVER_DEFAULT, api_token=None, asset_uid=None)
 
     if not os.path.exists(kobo_form_xlsx):
         # Si falta el XLSForm, tratar de generarlo automáticamente.
-        from kobo.xlsform_builder import generar_xlsform_noticias, generar_xlsform_metricas_alerta
+        from kobo.xlsform_builder import (
+            generar_xlsform_noticias, 
+            generar_xlsform_metricas_alerta,
+            generar_xlsform_precipitacion_nacional,
+        )
 
         os.makedirs(os.path.join(basedir, 'xlsforms'), exist_ok=True)
-        if file in ('noticias_emergencia_vzla', 'noticias_emergencia'):
+        if file in ('noticias_emergencia', 'noticias_emergencia'):
             print(f'No se encontró {kobo_form_xlsx}. Generando XLSForm automáticamente.')
             generar_xlsform_noticias(kobo_form_xlsx)
-        elif file in ('metricas_alerta_vzla', 'metricas_alerta'):
+        elif file in ('metricas_alerta', 'metricas_alerta'):
             print(f'No se encontró {kobo_form_xlsx}. Generando XLSForm automáticamente.')
             generar_xlsform_metricas_alerta(kobo_form_xlsx)
+        elif file in ('precipitacion_nacional',):
+            print(f'No se encontró {kobo_form_xlsx}. Generando XLSForm automáticamente.')
+            generar_xlsform_precipitacion_nacional(kobo_form_xlsx)
 
         if not os.path.exists(kobo_form_xlsx):
             alt_path = os.path.join(basedir, 'kobo', nombre)

@@ -17,31 +17,32 @@ EMERGENCIAS = {
     'llanos': ['apure', 'barinas', 'portuguesa', 'cojedes', 'guarico', 'san fernando', 'guanare', 'calabozo', 'llanos', 'apureño'],
     'costa': ['costa', 'litoral', 'playa', 'mar', 'choroni', 'ocumare', 'puerto cabello', 'costero', 'morrocoy'],
     'barrio': ['barrio', 'cerro', 'sector popular', 'rancho', 'vivienda precaria', 'asentamiento', 'comunidad', 'invasión'],
-    'urbanizacion': ['urbanizacion', 'residencias', 'edificio', 'condominio', 'quinta', 'calle', 'avenida', 'conjunto'],
+    'urbanizacion': ['urbanizacion', 'residencial', 'edificio', 'condominio', 'quinta'],
 
     # Nivel de afectación / consecuencias
-    'daños': ['daño', 'destruccion', 'colapso', 'escombros', 'perdida', 'ruina', 'afectacion', 'grieta', 
-              'desplome', 'siniestro', 'viviendas afectadas', 'inundacion', 'anegacion', 'anegamiento', 
-              'crecida', 'deslave', 'derrumbe', 'alud', 'desborde', 'desbordamiento', 'viviendas inundadas', 
-              'viviendas afectadas', 'casas afectadas', 'colapso', 'socavacion'],
-    'victimas': ['victima', 'fallecido', 'fallecida', 'muerto', 'herido', 'lesionado', 'desaparecido', 'damnificado', 
-                 'cadaver', 'atrapado', 'deceso', 'afectado', 'familias afectadas', 'personas afectadas', 
-                 'evacuados', 'evacuadas', 'desalojados', 'desalojadas', 'reubicados', 'reubicadas', 'sobreviviente'],
-    'rescate': ['rescate', 'salvamento', 'evacuacion', 'bomberos', 'proteccion civil', 'paramedicos', 
-                'busqueda', 'voluntarios'],
-
+    'daños': [' daño', ' destru', ' colaps', 'escombro', 'perdida', ' ruina', ' afecta', 'grieta', 
+              'agrietad', 'desplom', 'siniestro', ' inunda', ' anega', ' crecida', 'deslave', 
+              'derrumb', ' alud', 'desbord', ' socav'],
+    'victimas': ['victima', 'falleci', ' muert', ' herid', 'lesionad', 'desaparecid', 'damnificad', 
+                 'cadaver', 'atrapad', 'deceso', 'afectad', ' evacua', 'desalojad', 'reubicad', 
+                 'sobreviviente'],
+    'rescate': [' rescat', 'salvamento', ' bomber', 'proteccion civil', 'paramedico', ' busqueda', 
+                ' voluntari'],
     # Atención, salud y refugio
-    'atencion': ['refugio', 'albergue', 'cancha', 'iglesia', 'hospital', 'clinica', 'cdi', 'ambulatorio', 'carpa', 'campamento', 'triaje', 'acopio', 'donacion', 'insumos', 'medicinas', 'alimentos', 'agua potable'],
+    'atencion': [' refugi', ' alberg', ' cancha', 'iglesia', 'hospital', 'clinica', ' cdi', 'ambulatorio', 
+                 ' carpa', 'campamento', ' triaje', 'acopio', 'donacion', ' insumos', 'medicinas', 
+                 ' alimento', ' potable'],
 
     # Tipos de eventos y desastres
     'eventos': [
-        'sismo', 'terremoto', 'temblor', 'replica', 'escala richter', 'inundacion', 'anegacion',
-        'desbordamiento', 'crecida', 'deslave', 'derrumbe', 'deslizamiento', 'alud', 'barro',
-        'aguacero', 'tormenta', 'precipitaciones', 'vaguada', 'lluvia', 'onda tropical',
+        'sismo', 'terremoto', ' tembl', 'replica', 'escala de richter', ' inund', ' aneg', 'desbord', 
+        ' crecida', 'deslave', 'derrumb', 'deslizamiento', ' alud', 'aguacero', 'tormenta', 'precipitaciones', 
+        'vaguada', 'lluvi', 'onda tropical', 'chuvasco', 'llovizna'
         # Sequía (agregado)
-        'sequia', 'racionamiento', 'escasez de agua', 'embalses bajos', 'nivel de embalses',
+        ' sequia', 'racionamiento', 'escasez de agua', 'estres hidrico', 'deshidrata', 'desiert', 'desertic', 
+        'embalses bajos', 'nivel del embalse', 'nivel de los embalses',
         # Huracán / ciclón tropical (agregado)
-        'huracan', 'tormenta tropical', 'ciclon', 'vientos huracanados', 'marejada',
+        'huracan', 'tormenta', ' ciclon', 'marejada',
     ],
 }
 

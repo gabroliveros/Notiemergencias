@@ -43,8 +43,9 @@ from pathlib import Path
 from procesamiento.unir_partes import pipeline_completo as unir_partes_pipeline
 from procesamiento.limpieza_clasificacion import pipeline_completo as limpieza_pipeline
 from procesamiento.metricas_alerta import pipeline_completo as metricas_pipeline
-from kobo.subir_a_kobo import pipeline_completo as subir_kobo_pipeline
+from kobo.subir_a_kobo import pipeline_completo as subir_kobo_pipeline, pipeline_precipitacion as subir_precipitacion_pipeline
 from kobo.gestionar_formularios import asegurar_formulario_desplegado
+from OpenMeteo.openmeteo import escanear_riesgo_nacional
 
 
 tiempo_inicio = time.time()
@@ -126,7 +127,7 @@ def preparar_carpeta_descargas(config):
             f,
         )
 
-    return carpeta
+    return carpeta, reutilizar
 
 
 def configurar_logging(carpeta_logs):
@@ -207,6 +208,7 @@ def _asegurar_ambos_formularios(logger, kobo_cfg):
     for nombre_xlsform, form_id in [
         (kobo_cfg['form_id_noticias'], kobo_cfg['form_id_noticias']),
         (kobo_cfg['form_id_metricas'], kobo_cfg['form_id_metricas']),
+        (kobo_cfg['form_id_precipitacion'], kobo_cfg['form_id_precipitacion']),
     ]:
         creado, _ = asegurar_formulario_desplegado(
             nombre_xlsform, form_id, kobo_cfg['api_token'], server=kobo_cfg['server']
@@ -222,7 +224,7 @@ def main(ruta_config='env_prod.json'):
 
     # Se prepara ANTES del logging: el log de esta corrida vive dentro de
     # esta misma carpeta, no queremos que la limpieza se lo lleve.
-    carpeta = preparar_carpeta_descargas(config)
+    carpeta, datos_recientes_disponibles = preparar_carpeta_descargas(config)
 
     logger, ruta_log = configurar_logging(os.path.join(carpeta, 'logs'))
     logger.info(f'Iniciando pipeline completo. Carpeta de trabajo: {carpeta} | Log: {ruta_log}')
@@ -250,12 +252,17 @@ def main(ruta_config='env_prod.json'):
         fecha_desde = fecha_hasta = None
 
     try:
-        ejecutar_fase(logger, 'scraper', ejecutar_scraper, logger, config)
+        if datos_recientes_disponibles and Path(ruta_noticias_crudas).exists():
+            logger.info(
+                f"Se omite scraper y unir_partes: ya existen datos recientes de la misma situación/día en '{ruta_noticias_crudas}'."
+            )
+        else:
+            ejecutar_fase(logger, 'scraper', ejecutar_scraper, logger, config)
 
-        ejecutar_fase(
-            logger, 'unir_partes',
-            unir_partes_pipeline, carpeta, ruta_noticias_crudas, rutas['csv_base'] + '_part*.csv',
-        )
+            ejecutar_fase(
+                logger, 'unir_partes',
+                unir_partes_pipeline, carpeta, ruta_noticias_crudas, rutas['csv_base'] + '_part*.csv',
+            )
 
         ejecutar_fase(
             logger, 'limpieza_clasificacion',
@@ -285,6 +292,16 @@ def main(ruta_config='env_prod.json'):
             form_id_noticias=kobo_cfg['form_id_noticias'],
             form_id_metricas=kobo_cfg['form_id_metricas'],
             ruta_registro_envios=ruta_registro_envios,
+        )
+
+        # Escaner de Precipitaciones Acumuladas de OpenMeteo
+        df_precipitacion = ejecutar_fase(logger, 'escanear_precipitacion', escanear_riesgo_nacional)
+
+        ejecutar_fase(
+            logger, 'subir_precipitacion_kobo',
+            subir_precipitacion_pipeline, df_precipitacion,
+            kobo_cfg['api_token'], kobo_cfg['username'],
+            form_id_precipitacion=kobo_cfg['form_id_precipitacion'],
         )
 
         logger.info('=== PIPELINE COMPLETO: TODAS LAS FASES OK ===')

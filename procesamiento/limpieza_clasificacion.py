@@ -25,7 +25,7 @@ from collections import Counter
 from datetime import datetime, timedelta
 import pandas as pd
 from unidecode import unidecode
-
+from procesamiento.metricas_alerta import extraer_estado
 from procesamiento.diccionarios import (
     EMERGENCIAS,
     EQUIVALENCIAS_FRECUENCIA,
@@ -84,8 +84,6 @@ def filtrar_snippets_con_fecha_inicial(df):
     texto_normalizado = df['snippet_full'].astype(str).apply(unidecode)
     mask = texto_normalizado.str.match(PATRON_FECHA_INICIAL, na=False)
     filtrado = df[mask].copy()
-    print(f'Filtro de fecha inicial: {antes} -> {len(filtrado)} registros '
-          f'(se descartaron {antes - len(filtrado)} sin fecha reconocible al inicio del snippet).')
     return filtrado
 
 # --------------------------------------------------------------------------
@@ -110,9 +108,12 @@ def limpiar_y_normalizar(df):
     df = df[(df['snippet_full'] != '') & (df['snippet_full'] != 'nan') & (df['snippet_full'].notna())]
 
     df[['title_clean', 'snippet_full_clean']] = df[['title', 'snippet_full']].map(lambda x: unidecode(x.lower()))
-    df['snippet_full_clean'] = df['snippet_full_clean'].str.replace(SIGNOS_PATTERN, ' ', regex=True)
-    df['snippet_full_clean'] = df['snippet_full_clean'].str.replace(r'[.,]', '', regex=True)
-    df['snippet_full_clean'] = df['snippet_full_clean'].str.replace(r'\s+', ' ', regex=True).str.strip()
+    for col in ['title_clean', 'snippet_full_clean']:
+        df[col] = df[col].str.replace(SIGNOS_PATTERN, ' ', regex=True)
+        df[col] = df[col].str.replace(r'[.,]', '', regex=True)
+        df[col] = df[col].str.replace(r'\s+', ' ', regex=True).str.strip()
+
+    df['texto_clasificacion'] = (df['title_clean'] + ' ' + df['snippet_full_clean']).str.strip()
     return df
 
 
@@ -164,8 +165,6 @@ def filtrar_ventana_fecha(df, fecha_desde=None, fecha_hasta=None):
         return df
 
     antes = len(df)
-    print(df[['fecha', 'fecha_dt']].head(20).to_string())
-    print(df['fecha'].value_counts(dropna=False))
     mask = df['fecha_dt'].notna()
     if fecha_desde is not None:
         mask &= df['fecha_dt'] >= pd.Timestamp(fecha_desde)
@@ -173,8 +172,7 @@ def filtrar_ventana_fecha(df, fecha_desde=None, fecha_hasta=None):
         mask &= df['fecha_dt'] <= pd.Timestamp(fecha_hasta) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
 
     filtrado = df[mask].copy()
-    print(f'Filtro de ventana de fecha ({fecha_desde} a {fecha_hasta}): {antes} -> {len(filtrado)} registros '
-          f'(se descartaron {antes - len(filtrado)} fuera de rango o sin fecha reconocible).')
+
     return filtrado
 
 
@@ -220,7 +218,8 @@ def clasificar_categorias(df):
     logística/atención/eventos) con las palabras clave encontradas en cada registro."""
     df = df.copy()
     for categoria, palabras in EMERGENCIAS.items():
-        df[categoria] = df['snippet_full_clean'].apply(lambda x: _clasificar_ambiente(x, palabras))
+        df[categoria] = df['texto_clasificacion'].apply(lambda x: _clasificar_ambiente(x, palabras))
+
     return df
 
 
@@ -367,6 +366,7 @@ def pipeline_completo(ruta_excel_entrada, ruta_excel_salida, aplicar_ner=False, 
     df = filtrar_venezuela(df)
     df = clasificar_red_social(df)
     df = clasificar_categorias(df)
+    df["estado"] = df["texto_clasificacion"].apply(extraer_estado)
 
     if aplicar_ner:
         df = extraer_entidades_ner(df)

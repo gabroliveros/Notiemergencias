@@ -8,11 +8,11 @@ envía usando kobo/gestionar_formularios.py.
 
 Histórico: ninguna corrida borra datos de Kobo (eso solo lo hace
 gestionar_formularios.upload_koboform, y a propósito no forma parte de este
-pipeline). Las métricas de alerta se acumulan corrida tras corrida sin
-deduplicar — eso es lo que arma la línea de tiempo en el tablero. Las
-noticias sí se deduplican contra un registro local (registro_envios_kobo,
-ver RUTA_REGISTRO_ENVIOS_DEFAULT) para no subir el mismo enlace repetido en
-cada corrida solo porque sigue cayendo dentro de la ventana de 48h.
+pipeline). Las métricas de alerta se acumulan corrida tras corrida 
+deduplicando por estado|tipo_evento|día|nivel. Las noticias se deduplican 
+contra un registro local (registro_envios_kobo, ver RUTA_REGISTRO_ENVIOS_DEFAULT)
+para no subir el mismo enlace repetido en cada corrida solo porque sigue 
+cayendo dentro de la ventana de xxhoras.
 
 Uso:
     python -m kobo.subir_a_kobo <noticias_procesadas.xlsx> <alertas.xlsx> <api_token> [minimo_noticias]
@@ -29,15 +29,17 @@ from procesamiento.metricas_alerta import (canonicalizar_eventos, extraer_domini
 from kobo.xlsform_builder import nombre_choice
 from kobo.gestionar_formularios import enviar_filas
 
-FORM_ID_NOTICIAS = 'noticias_emergencia_vzla'
-FORM_ID_METRICAS = 'metricas_alerta_vzla'
+FORM_ID_NOTICIAS = 'noticias_emergencia'
+FORM_ID_METRICAS = 'metricas_alerta'
+FORM_ID_PRECIPITACION = 'precipitacion_nacional'
 
 ORDEN_NIVEL = {'Rojo': 0, 'Naranja': 1, 'Amarillo': 2, 'Verde': 3}
 
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'env_prod.json'), encoding='utf-8') as f:
     _CFG_RUTAS = json.load(f).get('rutas', {})
-RUTA_REGISTRO_ENVIOS_DEFAULT = _CFG_RUTAS.get('registro_envios_kobo')
 
+RUTA_REGISTRO_ENVIOS_DEFAULT = _CFG_RUTAS.get('registro_envios_kobo')
+RUTA_REGISTRO_ALERTAS_DEFAULT = _CFG_RUTAS.get('registro_alertas_kobo')
 
 def cargar_registro_envios(ruta=RUTA_REGISTRO_ENVIOS_DEFAULT):
     """Devuelve el conjunto de URLs de noticias que ya se subieron a Kobo en
@@ -54,6 +56,27 @@ def guardar_registro_envios(urls, ruta=RUTA_REGISTRO_ENVIOS_DEFAULT):
         json.dump(sorted(urls), f, ensure_ascii=False, indent=2)
 
 
+def construir_clave_alerta(estado, tipo_evento, fecha_calculo, nivel_alerta):
+    """Identifica de forma única un (estado, tipo_evento, nivel) dentro de un
+    mismo día calendario. Mientras el nivel no cambie el mismo día, la clave
+    se repite y la alerta no se vuelve a subir a Kobo."""
+    fecha = pd.Timestamp(fecha_calculo).strftime('%Y-%m-%d')
+    return f'{estado}|{tipo_evento}|{fecha}|{nivel_alerta}'
+
+
+def cargar_registro_alertas(ruta=RUTA_REGISTRO_ALERTAS_DEFAULT):
+    if os.path.exists(ruta):
+        with open(ruta, encoding='utf-8') as f:
+            return set(json.load(f))
+    return set()
+
+
+def guardar_registro_alertas(claves, ruta=RUTA_REGISTRO_ALERTAS_DEFAULT):
+    os.makedirs(os.path.dirname(ruta), exist_ok=True)
+    with open(ruta, 'w', encoding='utf-8') as f:
+        json.dump(sorted(claves), f, ensure_ascii=False, indent=2)
+
+
 # --------------------------------------------------------------------------
 # Selección y enriquecimiento de noticias
 # --------------------------------------------------------------------------
@@ -66,9 +89,14 @@ def enriquecer_noticias_con_alerta(df_noticias, df_alertas):
     evento reconocible.
     """
     df = df_noticias.copy()
-    df['estado'] = df['snippet_full_clean'].apply(extraer_estado)
+    df['estado'] = df['estado'].fillna(df['texto_clasificacion'].apply(extraer_estado))
     df['tipos_evento_canonico'] = df['eventos'].apply(canonicalizar_eventos)
     df = df[df['estado'].notna() & df['tipos_evento_canonico'].map(len).gt(0)].copy()
+
+    if df.empty:
+        df['tipo_evento'] = pd.Series(dtype=object)
+        df['nivel_alerta_asociado'] = pd.Series(dtype=object)
+        return df
 
     mapa_alerta = {(r.estado, r.tipo_evento): r.nivel_alerta for r in df_alertas.itertuples()}
 
@@ -81,7 +109,7 @@ def enriquecer_noticias_con_alerta(df_noticias, df_alertas):
         tipo, nivel = min(candidatos, key=lambda x: ORDEN_NIVEL.get(x[1], 99))
         return pd.Series({'tipo_evento': tipo, 'nivel_alerta_asociado': nivel})
 
-    df[['tipo_evento', 'nivel_alerta_asociado']] = df.apply(_mejor_match, axis=1)
+    df[['tipo_evento', 'nivel_alerta_asociado']] = df.apply(_mejor_match, axis=1, result_type='expand')
     return df
 
 
@@ -134,6 +162,20 @@ def preparar_fila_metrica(fila):
     }
 
 
+def preparar_fila_precipitacion(fila):
+    return {
+        'fecha_calculo': pd.Timestamp(fila['fecha_calculo']).isoformat(),
+        'estado': fila['estado'],
+        'capital': fila['capital'],
+        'precipitacion_30dias': float(fila['precipitacion_30dias']),
+        'saturacion': float(fila['saturacion']),
+        'nivel_alerta': fila['nivel_alerta'],
+        'umbral_amarillo': float(fila['umbral_amarillo']),
+        'umbral_naranja': float(fila['umbral_naranja']),
+        'umbral_rojo': float(fila['umbral_rojo']),
+    }
+
+
 # --------------------------------------------------------------------------
 # Pipeline completo
 # --------------------------------------------------------------------------
@@ -145,6 +187,17 @@ def _situaciones_lista(situacion):
     return [situacion] if isinstance(situacion, str) else list(situacion)
 
 
+def pipeline_precipitacion(df_precipitacion, api_token, username, form_id_precipitacion=FORM_ID_PRECIPITACION):
+    """Sube el snapshot de precipitación nacional a Kobo. Sin deduplicar:
+    cada corrida agrega un snapshot nuevo a la línea de tiempo."""
+    filas = [preparar_fila_precipitacion(fila) for _, fila in df_precipitacion.iterrows()]
+    if not filas:
+        print('No hay datos de precipitación para enviar.')
+        return []
+    print('\nEnviando datos de precipitación nacional...')
+    return enviar_filas(form_id_precipitacion, filas, api_token, username)
+
+
 def pipeline_completo(
     ruta_noticias_procesadas,
     ruta_alertas,
@@ -154,6 +207,7 @@ def pipeline_completo(
     form_id_noticias=FORM_ID_NOTICIAS,
     form_id_metricas=FORM_ID_METRICAS,
     ruta_registro_envios=RUTA_REGISTRO_ENVIOS_DEFAULT,
+    ruta_registro_alertas=RUTA_REGISTRO_ALERTAS_DEFAULT,
     situacion=None
 ):
     df_noticias = pd.read_excel(ruta_noticias_procesadas)
@@ -213,7 +267,23 @@ def pipeline_completo(
         filas_noticias = [preparar_fila_noticia(fila) for _, fila in seleccion.iterrows()]
 
     # --- Métricas: SIN deduplicar, cada corrida agrega su snapshot (línea de tiempo) ---
-    filas_metricas = [preparar_fila_metrica(fila) for _, fila in df_alertas.iterrows()]
+    # --- Métricas: se sube cada (estado, tipo_evento, día, nivel) una sola vez.
+    # Si el nivel cambia el mismo día, o cambia el día, se considera una alerta
+    # nueva y sí se sube; así se arma la línea de tiempo sin repetir snapshots
+    # idénticos corrida tras corrida ---
+    claves_alerta_ya_enviadas = cargar_registro_alertas(ruta_registro_alertas)
+    df_alertas = df_alertas.copy()
+    df_alertas['_clave_alerta'] = df_alertas.apply(
+        lambda fila: construir_clave_alerta(fila['estado'], fila['tipo_evento'], fila['fecha_calculo'], fila['nivel_alerta']),
+        axis=1
+    )
+    df_alertas_nuevas = df_alertas[~df_alertas['_clave_alerta'].isin(claves_alerta_ya_enviadas)]
+
+    omitidas_alertas = len(df_alertas) - len(df_alertas_nuevas)
+    if omitidas_alertas:
+        print(f'{omitidas_alertas} alertas ya se habían subido en corridas anteriores (mismo estado/tipo_evento/día/nivel) — se omiten.')
+
+    filas_metricas = [preparar_fila_metrica(fila) for _, fila in df_alertas_nuevas.iterrows()]
 
     errores_noticias = []
     if filas_noticias:
@@ -228,8 +298,18 @@ def pipeline_completo(
     else:
         print('\nNo hay noticias nuevas por enviar en esta corrida.')
 
-    print('\nEnviando métricas de alerta (snapshot de esta corrida, se acumula para el histórico)...')
-    errores_metricas = enviar_filas(form_id_metricas, filas_metricas, api_token, username)
+    if filas_metricas:
+        print('\nEnviando métricas de alerta nuevas (snapshot de esta corrida, se acumula para el histórico)...')
+        errores_metricas = enviar_filas(form_id_metricas, filas_metricas, api_token, username)
+
+        indices_fallidos_metricas = {i for i, _, _ in errores_metricas}
+        claves_enviadas_ok = {
+            df_alertas_nuevas.iloc[i]['_clave_alerta'] for i in range(len(df_alertas_nuevas)) if i not in indices_fallidos_metricas
+        }
+        guardar_registro_alertas(claves_alerta_ya_enviadas | claves_enviadas_ok, ruta_registro_alertas)
+    else:
+        print('\nNo hay alertas nuevas por enviar en esta corrida.')
+        errores_metricas = []
 
     if errores_noticias:
         print('\nErrores al enviar noticias:', errores_noticias[:3], '...' if len(errores_noticias) > 3 else '')

@@ -62,7 +62,7 @@ def _hoja_choices_comun(wb):
     _escribir_hoja(wb, 'choices', ['list_name', 'name', 'label'], filas)
 
 
-def generar_xlsform_noticias(ruta_salida='xlsforms/noticias_emergencia_vzla.xlsx'):
+def generar_xlsform_noticias(ruta_salida='xlsforms/noticias_emergencia.xlsx'):
     directorio = os.path.dirname(ruta_salida)
     if directorio:
         os.makedirs(directorio, exist_ok=True)
@@ -86,14 +86,14 @@ def generar_xlsform_noticias(ruta_salida='xlsforms/noticias_emergencia_vzla.xlsx
         wb,
         'settings',
         ['form_title', 'form_id', 'version'],
-        [['noticias_emergencia_vzla', 'noticias_emergencia_vzla', '1.0']],
+        [['noticias_emergencia', 'noticias_emergencia', '1.0']],
     )
 
     wb.save(ruta_salida)
     print(f'Generado: {ruta_salida}')
 
 
-def generar_xlsform_metricas_alerta(ruta_salida='xlsforms/metricas_alerta_vzla.xlsx'):
+def generar_xlsform_metricas_alerta(ruta_salida='xlsforms/metricas_alerta.xlsx'):
     directorio = os.path.dirname(ruta_salida)
     if directorio:
         os.makedirs(directorio, exist_ok=True)
@@ -120,7 +120,38 @@ def generar_xlsform_metricas_alerta(ruta_salida='xlsforms/metricas_alerta_vzla.x
         wb,
         'settings',
         ['form_title', 'form_id', 'version'],
-        [['metricas_alerta_vzla', 'metricas_alerta_vzla', '1.0']],
+        [['metricas_alerta', 'metricas_alerta', '1.0']],
+    )
+
+    wb.save(ruta_salida)
+    print(f'Generado: {ruta_salida}')
+
+
+def generar_xlsform_precipitacion_nacional(ruta_salida="xlsforms/precipitacion_nacional.xlsx"):
+    directorio = os.path.dirname(ruta_salida)
+    if directorio:
+        os.makedirs(directorio, exist_ok=True)
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+
+    survey = [
+        ['dateTime', 'fecha_calculo', 'Fecha de cálculo'],
+        ['select_one estados', 'estado', 'Estado'],
+        ['text', 'capital', 'Capital'],
+        ['decimal', 'precipitacion_30dias', 'Precipitación 30 días'],
+        ['decimal', 'saturacion', 'Saturación'],
+        ['select_one niveles_alerta', 'nivel_alerta', 'Nivel de alerta'],
+        ['decimal', 'umbral_amarillo', 'Amarilla'],
+        ['decimal', 'umbral_naranja', 'Naranja'],
+        ['decimal', 'umbral_rojo', 'Roja'],
+    ]
+    _escribir_hoja(wb, 'survey', ['type', 'name', 'label'], survey)
+    _hoja_choices_comun(wb)
+    _escribir_hoja(
+        wb,
+        'settings',
+        ['form_title', 'form_id', 'version'],
+        [['precipitacion_nacional', 'precipitacion_nacional', '1.0']],
     )
 
     wb.save(ruta_salida)
@@ -151,4 +182,5 @@ def validar_xlsform(ruta):
 if __name__ == '__main__':
     generar_xlsform_noticias()
     generar_xlsform_metricas_alerta()
-    validar_xlsform('xlsforms/noticias_emergencia_vzla.xlsx')
+    generar_xlsform_precipitacion_nacional()
+    validar_xlsform('xlsforms/noticias_emergencia.xlsx')

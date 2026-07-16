@@ -31,15 +31,19 @@ VENTANA_HORAS_DEFAULT = 48
 # Mapeo exacto de cada palabra clave de EMERGENCIAS['eventos'] a un tipo de
 # evento canónico, para poder agrupar/alertar por tipo.
 MAPA_EVENTO_CANONICO = {
-    'sismo': 'sismo', 'terremoto': 'sismo', 'temblor': 'sismo', 'replica': 'sismo', 'escala richter': 'sismo',
-    'inundacion': 'inundacion', 'anegacion': 'inundacion', 'desbordamiento': 'inundacion', 'crecida': 'inundacion',
-    'deslave': 'deslave', 'derrumbe': 'deslave', 'deslizamiento': 'deslave', 'alud': 'deslave', 'barro': 'deslave',
-    'aguacero': 'lluvias', 'tormenta': 'lluvias', 'precipitaciones': 'lluvias', 'vaguada': 'lluvias',
-    'lluvia': 'lluvias', 'onda tropical': 'lluvias',
-    'sequia': 'sequia', 'racionamiento': 'sequia', 'escasez de agua': 'sequia',
-    'embalses bajos': 'sequia', 'nivel de embalses': 'sequia',
-    'huracan': 'huracan', 'tormenta tropical': 'huracan', 'ciclon': 'huracan',
-    'vientos huracanados': 'huracan', 'marejada': 'huracan',
+    'sismo': 'sismo', 'terremoto': 'sismo', ' tembl': 'sismo', 'replica': 'sismo', 
+    'escala de richter': 'sismo', 'derrumb': 'sismo',
+    
+    ' inund': 'lluvias', ' aneg': 'lluvias', 'desbord': 'lluvias', 'crecida': 'lluvias',
+    'deslave': 'lluvias', 'deslizamiento': 'lluvias', ' alud': 'lluvias', 'aguacero': 'lluvias', 
+    'tormenta': 'lluvias', 'precipitaciones': 'lluvias', 'vaguada': 'lluvias', 'lluvi': 'lluvias', 
+    'onda tropical': 'lluvias', 'tormenta': 'lluvias', 'chuvasco': 'lluvias', 'llovizna': 'lluvias',
+
+    ' sequia': 'sequia', 'racionamiento': 'sequia', 'escasez de agua': 'sequia', 'estres hidrico': 'sequia', 
+    'deshidrata': 'sequia', 'desiert': 'sequia', 'desertic': 'sequia', 'embalses bajos': 'sequia', 
+    'nivel del embalse': 'sequia', 'nivel de los embalses': 'sequia', 
+
+    'huracan': 'huracan', 'ciclon': 'huracan', 'marejada': 'huracan',
 }
 
 _ESTADOS_ORDENADOS = sorted(ESTADOS, key=len, reverse=True)  # más largos primero (ej: "la guaira" antes que "la")
@@ -54,6 +58,7 @@ def extraer_estado(criterio_busqueda):
     if not isinstance(criterio_busqueda, str):
         return None
     texto = criterio_busqueda.lower()
+
     for estado in _ESTADOS_ORDENADOS:
         if estado in texto:
             return estado
@@ -81,12 +86,14 @@ def filtrar_eventos_por_situacion(lista_eventos, situacion):
     """
     Devuelve solamente eventos relacionados con la situación activa.
     """
-    grupos = {'lluvias': {'lluvias', 'inundacion', 'deslave', 'inundacion', 'onda tropical', 
+    grupos = {'lluvias': {'lluvias', 'inundacion', 'deslave', 'inund', 'onda tropical', 
                           'crecida', 'preciptaciones', 'desbordamiento', 'anegacion', 
                           'deslizamiento', 'vaguada', 'aguacero', 'chuvasco', 'llovizna'}, 
+
+
               'sismo'  : {'sismo', 'terremoto', 'temblor', 'escala de richter', 'derrumbe', 
                           'colapso'}, 
-              'sequia' : {'sequia', 'estrés hidrico', 'deshidratacion', 'desierto'}, 
+              'sequia' : {'sequia', 'estres hidrico', 'deshidratacion', 'desierto'}, 
               'huracan': {'huracan', 'huracanados', 'ventarron', 'tornado', 'rafagas de viento', 
                           'ventisca'}}
 
@@ -105,7 +112,7 @@ def preparar_dataframe_alertas(df, situacion=None):
     Descarta registros sin estado o sin tipo de evento reconocido.
     """
     df = df.copy()
-    df['estado'] = df['snippet_full_clean'].apply(extraer_estado)
+    df['estado'] = df['texto_clasificacion'].apply(extraer_estado)
     df['dominio'] = df['url'].apply(extraer_dominio)
     df['tipo_evento'] = df['eventos'].apply(canonicalizar_eventos)
 
