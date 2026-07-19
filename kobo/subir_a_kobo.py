@@ -219,8 +219,23 @@ def pipeline_completo(
 
     df_alertas = pd.read_excel(ruta_alertas)
 
+    claves_alerta_ya_enviadas = cargar_registro_alertas(ruta_registro_alertas)
+
     if df_alertas.empty:
-        print('El archivo de alertas está vacío — se subirán noticias relevantes sin nivel de alerta.')
+        df_alertas_nuevas = df_alertas
+    else:
+        df_alertas = df_alertas.copy()
+        df_alertas['_clave_alerta'] = df_alertas.apply(
+            lambda fila: construir_clave_alerta(fila['estado'], fila['tipo_evento'], fila['fecha_calculo'], fila['nivel_alerta']),
+            axis=1
+        )
+        df_alertas_nuevas = df_alertas[~df_alertas['_clave_alerta'].isin(claves_alerta_ya_enviadas)]
+
+        omitidas_alertas = len(df_alertas) - len(df_alertas_nuevas)
+        if omitidas_alertas:
+            print(f'{omitidas_alertas} alertas ya se habían subido en corridas anteriores (mismo estado/tipo_evento/día/nivel) — se omiten.')
+
+    filas_metricas = [preparar_fila_metrica(fila) for _, fila in df_alertas_nuevas.iterrows()]
 
     if df_noticias.empty:
         print('No hay noticias relevantes en esta corrida — se omite el envío de noticias.')
@@ -266,26 +281,8 @@ def pipeline_completo(
         seleccion = pd.concat(selecciones, ignore_index=True).drop_duplicates(subset='url') if selecciones else df_noticias.iloc[0:0]
         filas_noticias = [preparar_fila_noticia(fila) for _, fila in seleccion.iterrows()]
 
-    # --- Métricas: SIN deduplicar, cada corrida agrega su snapshot (línea de tiempo) ---
-    # --- Métricas: se sube cada (estado, tipo_evento, día, nivel) una sola vez.
-    # Si el nivel cambia el mismo día, o cambia el día, se considera una alerta
-    # nueva y sí se sube; así se arma la línea de tiempo sin repetir snapshots
-    # idénticos corrida tras corrida ---
-    claves_alerta_ya_enviadas = cargar_registro_alertas(ruta_registro_alertas)
-    df_alertas = df_alertas.copy()
-    df_alertas['_clave_alerta'] = df_alertas.apply(
-        lambda fila: construir_clave_alerta(fila['estado'], fila['tipo_evento'], fila['fecha_calculo'], fila['nivel_alerta']),
-        axis=1
-    )
-    df_alertas_nuevas = df_alertas[~df_alertas['_clave_alerta'].isin(claves_alerta_ya_enviadas)]
-
-    omitidas_alertas = len(df_alertas) - len(df_alertas_nuevas)
-    if omitidas_alertas:
-        print(f'{omitidas_alertas} alertas ya se habían subido en corridas anteriores (mismo estado/tipo_evento/día/nivel) — se omiten.')
-
-    filas_metricas = [preparar_fila_metrica(fila) for _, fila in df_alertas_nuevas.iterrows()]
-
     errores_noticias = []
+    
     if filas_noticias:
         print('\nEnviando noticias...')
         errores_noticias = enviar_filas(form_id_noticias, filas_noticias, api_token, username)
