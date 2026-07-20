@@ -16,6 +16,8 @@ Flujo paralelo (hidrológico, independiente de las noticias):
     Open-Meteo (24 capitales) → Cálculo de nivel de riesgo → KoboToolbox → Power BI
 ```
 
+![Tablero de Notiemergencias](imagenes/notiemergencias2.png)
+
 ## Tabla de contenido
 
 - [Arquitectura](#arquitectura)
@@ -258,6 +260,8 @@ Agrupa las noticias por *estado × tipo de evento* dentro de la ventana de tiemp
 configurada y calcula, por grupo: número de noticias, número de fuentes distintas,
 si hay víctimas/rescate/daños mencionados, fecha más reciente, y el nivel de alerta
 (ver regla abajo).
+
+![Tablero de Noticias relacionadas](imagenes/notiemergencias3.png)
 
 ### 5. Precipitación nacional (hidrológico)
 Consulta en paralelo (`ThreadPoolExecutor`) la API histórica de Open-Meteo para las 24 
