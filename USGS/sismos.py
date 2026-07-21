@@ -91,36 +91,53 @@ def calcular_nivel_alerta(magnitud_maxima, umbrales_estado):
 def escanear_sismos_nacional(ventana_dias, minmagnitude, radio_km_maximo, capitales, umbrales_por_estado):
     """Devuelve (df_eventos, df_metricas):
     - df_eventos: un registro por sismo individual (para el detalle/mapa de puntos).
-    - df_metricas: una fila por estado con magnitud máxima, número de sismos,
-      profundidad promedio y nivel de alerta (snapshot de esta corrida)."""
+    - df_metricas: una fila POR CADA ESTADO configurado (incluso sin sismos,
+      con n_sismos=0 y nivel_alerta='verde'), para que el mapa siempre tenga
+      un valor que pintar en todos los estados."""
     print("\nConsultando catálogo sísmico de USGS...")
     df_sismos = consultar_sismos(ventana_dias, minmagnitude)
 
-    if df_sismos.empty:
-        print("Sin sismos registrados en la ventana/umbral configurados.")
-        return df_sismos, pd.DataFrame()
+    if not df_sismos.empty:
+        df_sismos["estado"] = df_sismos.apply(
+            lambda fila: _asignar_estado(fila["lat"], fila["lon"], capitales, radio_km_maximo), axis=1
+        )
+        sin_estado = df_sismos["estado"].isna().sum()
+        if sin_estado:
+            print(f"{sin_estado} sismos fuera del radio de asignación a un estado (mar/frontera) — se excluyen de métricas por estado.")
+        df_asignados = df_sismos[df_sismos["estado"].notna()].copy()
+    else:
+        print("Sin sismos registrados en la ventana/umbral configurados a nivel nacional.")
+        df_asignados = pd.DataFrame(columns=["estado", "magnitud", "profundidad_km"])
 
-    df_sismos["estado"] = df_sismos.apply(
-        lambda fila: _asignar_estado(fila["lat"], fila["lon"], capitales, radio_km_maximo), axis=1
-    )
-    sin_estado = df_sismos["estado"].isna().sum()
-    if sin_estado:
-        print(f"{sin_estado} sismos fuera del radio de asignación a un estado (mar/frontera) — se excluyen de métricas por estado.")
-
-    df_asignados = df_sismos[df_sismos["estado"].notna()].copy()
+    grupos_por_estado = {estado: grupo for estado, grupo in df_asignados.groupby("estado")}
 
     filas_metricas = []
-    for estado, grupo in df_asignados.groupby("estado"):
+    for estado in capitales:
         umbrales_estado = umbrales_por_estado.get(estado, umbrales_por_estado["_default"])
+        grupo = grupos_por_estado.get(estado)
+
+        if grupo is None or grupo.empty:
+            filas_metricas.append({
+                "fecha_calculo": datetime.now(),
+                "estado": nombre_choice(estado),
+                "ventana_dias": ventana_dias,
+                "n_sismos": 0,
+                "magnitud_maxima": 0.0,
+                "magnitud_promedio": 0.0,
+                "profundidad_promedio_km": 0.0,
+                "nivel_alerta": "verde",
+            })
+            continue
+
         magnitud_maxima = grupo["magnitud"].max()
         filas_metricas.append({
             "fecha_calculo": datetime.now(),
             "estado": nombre_choice(estado),
             "ventana_dias": ventana_dias,
             "n_sismos": len(grupo),
-            "magnitud_maxima": round(magnitud_maxima, 2),
-            "magnitud_promedio": round(grupo["magnitud"].mean(), 2),
-            "profundidad_promedio_km": round(grupo["profundidad_km"].mean(), 2),
+            "magnitud_maxima": magnitud_maxima,
+            "magnitud_promedio": grupo["magnitud"].mean(),
+            "profundidad_promedio_km": grupo["profundidad_km"].mean(),
             "nivel_alerta": calcular_nivel_alerta(magnitud_maxima, umbrales_estado).lower(),
         })
 
