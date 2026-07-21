@@ -255,61 +255,61 @@ def main(ruta_config='env_prod.json'):
         fecha_desde = fecha_hasta = None
 
     try:
-        # if datos_recientes_disponibles and Path(ruta_noticias_crudas).exists():
-        #     logger.info(
-        #         f"Se omite scraper y unir_partes: ya existen datos recientes de la misma situación/día en '{ruta_noticias_crudas}'."
-        #     )
-        # else:
-        #     ejecutar_fase(logger, 'scraper', ejecutar_scraper, logger, config)
+        if datos_recientes_disponibles and Path(ruta_noticias_crudas).exists():
+            logger.info(
+                f"Se omite scraper y unir_partes: ya existen datos recientes de la misma situación/día en '{ruta_noticias_crudas}'."
+            )
+        else:
+            ejecutar_fase(logger, 'scraper', ejecutar_scraper, logger, config)
 
-        #     ejecutar_fase(
-        #         logger, 'unir_partes',
-        #         unir_partes_pipeline, carpeta, ruta_noticias_crudas, rutas['csv_base'] + '_part*.csv',
-        #     )
+            ejecutar_fase(
+                logger, 'unir_partes',
+                unir_partes_pipeline, carpeta, ruta_noticias_crudas, rutas['csv_base'] + '_part*.csv',
+            )
 
-        # ejecutar_fase(
-        #     logger, 'limpieza_clasificacion',
-        #     limpieza_pipeline, ruta_noticias_crudas, ruta_noticias_procesadas,
-        #     fecha_desde=fecha_desde, fecha_hasta=fecha_hasta,
-        # )
+        ejecutar_fase(
+            logger, 'limpieza_clasificacion',
+            limpieza_pipeline, ruta_noticias_crudas, ruta_noticias_procesadas,
+            fecha_desde=fecha_desde, fecha_hasta=fecha_hasta,
+        )
         
-        # ejecutar_fase(
-        #     logger, 'metricas_alerta',
-        #     metricas_pipeline, ruta_noticias_procesadas, ruta_alertas,
-        #     ventana_horas=parametros['ventana_horas_alerta'], situacion=config['scraper']['situacion']
-        # )
+        ejecutar_fase(
+            logger, 'metricas_alerta',
+            metricas_pipeline, ruta_noticias_procesadas, ruta_alertas,
+            ventana_horas=parametros['ventana_horas_alerta'], situacion=config['scraper']['situacion']
+        )
 
         # No borra ni recrea nada si el formulario ya existe — solo lo crea
         # la primera vez que no lo encuentra en Kobo.
-        # ejecutar_fase(
-        #     logger, 'verificar_formularios_kobo',
-        #     _asegurar_ambos_formularios, logger, kobo_cfg,
-        # )
+        ejecutar_fase(
+            logger, 'verificar_formularios_kobo',
+            _asegurar_ambos_formularios, logger, kobo_cfg,
+        )
 
-        # ejecutar_fase(
-        #     logger, 'subir_a_kobo',
-        #     subir_kobo_pipeline, ruta_noticias_procesadas, ruta_alertas,
-        #     kobo_cfg['api_token'], kobo_cfg['username'], 
-        #     situacion=config['scraper']['situacion'],
-        #     minimo_noticias=parametros['minimo_noticias_a_subir'],
-        #     form_id_noticias=kobo_cfg['form_id_noticias'],
-        #     form_id_metricas=kobo_cfg['form_id_metricas'],
-        #     ruta_registro_envios=ruta_registro_envios,
-        # )
+        ejecutar_fase(
+            logger, 'subir_a_kobo',
+            subir_kobo_pipeline, ruta_noticias_procesadas, ruta_alertas,
+            kobo_cfg['api_token'], kobo_cfg['username'], 
+            situacion=config['scraper']['situacion'],
+            minimo_noticias=parametros['minimo_noticias_a_subir'],
+            form_id_noticias=kobo_cfg['form_id_noticias'],
+            form_id_metricas=kobo_cfg['form_id_metricas'],
+            ruta_registro_envios=ruta_registro_envios,
+        )
 
-        # # Escaner de Precipitaciones Acumuladas de OpenMeteo
-        # df_precipitacion = ejecutar_fase(
-        #     logger, 'escanear_precipitacion', escanear_riesgo_nacional,
-        #     ventana_dias=config['precipitacion']['ventana_dias'],
-        #     estados=config['precipitacion']['estados'],
-        # )
+        # Escaner de Precipitaciones Acumuladas de OpenMeteo
+        df_precipitacion = ejecutar_fase(
+            logger, 'escanear_precipitacion', escanear_riesgo_nacional,
+            ventana_dias=config['precipitacion']['ventana_dias'],
+            estados=config['precipitacion']['estados'],
+        )
 
-        # ejecutar_fase(
-        #     logger, 'subir_precipitacion_kobo',
-        #     subir_precipitacion_pipeline, df_precipitacion,
-        #     kobo_cfg['api_token'], kobo_cfg['username'],
-        #     form_id_precipitacion=kobo_cfg['form_id_precipitacion'],
-        # )
+        ejecutar_fase(
+            logger, 'subir_precipitacion_kobo',
+            subir_precipitacion_pipeline, df_precipitacion,
+            kobo_cfg['api_token'], kobo_cfg['username'],
+            form_id_precipitacion=kobo_cfg['form_id_precipitacion'],
+        )
 
         df_eventos_sismos, df_metricas_sismos = ejecutar_fase(
             logger, 'escanear_sismos', escanear_sismos_nacional,
