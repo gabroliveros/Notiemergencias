@@ -158,6 +158,31 @@ def generar_xlsform_precipitacion_nacional(ruta_salida="xlsforms/precipitacion_n
     print(f'Generado: {ruta_salida}')
 
 
+def generar_xlsform_sismos(ruta_salida='xlsforms/sismos_nacional.xlsx'):
+    directorio = os.path.dirname(ruta_salida)
+    if directorio:
+        os.makedirs(directorio, exist_ok=True)
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+
+    survey = [
+        ['dateTime', 'fecha_calculo', 'Fecha de cálculo'],
+        ['select_one estados', 'estado', 'Estado'],
+        ['integer', 'ventana_dias', 'Ventana (días)'],
+        ['integer', 'n_sismos', 'Número de sismos'],
+        ['decimal', 'magnitud_maxima', 'Magnitud máxima'],
+        ['decimal', 'magnitud_promedio', 'Magnitud promedio'],
+        ['decimal', 'profundidad_promedio_km', 'Profundidad promedio (km)'],
+        ['select_one niveles_alerta', 'nivel_alerta', 'Nivel de alerta'],
+    ]
+    _escribir_hoja(wb, 'survey', ['type', 'name', 'label'], survey)
+    _hoja_choices_comun(wb)
+    _escribir_hoja(wb, 'settings', ['form_title', 'form_id', 'version'],
+                    [['sismos_nacional', 'sismos_nacional', '1.0']])
+    wb.save(ruta_salida)
+    print(f'Generado: {ruta_salida}')
+
+
 def validar_xlsform(ruta):
     wb = openpyxl.load_workbook(ruta, data_only=True)
 
@@ -183,4 +208,5 @@ if __name__ == '__main__':
     generar_xlsform_noticias()
     generar_xlsform_metricas_alerta()
     generar_xlsform_precipitacion_nacional()
+    generar_xlsform_sismos()
     validar_xlsform('xlsforms/noticias_emergencia.xlsx')

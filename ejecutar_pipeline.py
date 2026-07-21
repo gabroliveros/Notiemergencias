@@ -44,9 +44,10 @@ from pathlib import Path
 from procesamiento.unir_partes import pipeline_completo as unir_partes_pipeline
 from procesamiento.limpieza_clasificacion import pipeline_completo as limpieza_pipeline
 from procesamiento.metricas_alerta import pipeline_completo as metricas_pipeline
-from kobo.subir_a_kobo import pipeline_completo as subir_kobo_pipeline, pipeline_precipitacion as subir_precipitacion_pipeline
+from kobo.subir_a_kobo import pipeline_completo as subir_kobo_pipeline, pipeline_precipitacion as subir_precipitacion_pipeline, pipeline_sismos as subir_sismos_pipeline
 from kobo.gestionar_formularios import asegurar_formulario_desplegado
 from OpenMeteo.openmeteo import escanear_riesgo_nacional
+from USGS.sismos import escanear_sismos_nacional
 
 
 tiempo_inicio = time.time()
@@ -210,6 +211,7 @@ def _asegurar_ambos_formularios(logger, kobo_cfg):
         (kobo_cfg['form_id_noticias'], kobo_cfg['form_id_noticias']),
         (kobo_cfg['form_id_metricas'], kobo_cfg['form_id_metricas']),
         (kobo_cfg['form_id_precipitacion'], kobo_cfg['form_id_precipitacion']),
+        (kobo_cfg['form_id_sismos'], kobo_cfg['form_id_sismos']),
     ]:
         creado, _ = asegurar_formulario_desplegado(
             nombre_xlsform, form_id, kobo_cfg['api_token'], server=kobo_cfg['server']
@@ -307,6 +309,22 @@ def main(ruta_config='env_prod.json'):
             subir_precipitacion_pipeline, df_precipitacion,
             kobo_cfg['api_token'], kobo_cfg['username'],
             form_id_precipitacion=kobo_cfg['form_id_precipitacion'],
+        )
+
+        df_eventos_sismos, df_metricas_sismos = ejecutar_fase(
+            logger, 'escanear_sismos', escanear_sismos_nacional,
+            ventana_dias=config['sismos']['ventana_dias'],
+            minmagnitude=config['sismos']['minmagnitude'],
+            radio_km_maximo=config['sismos']['radio_km_maximo'],
+            capitales=config['precipitacion']['estados'],
+            umbrales_por_estado=config['sismos']['umbrales'],
+        )
+
+        ejecutar_fase(
+            logger, 'subir_sismos_kobo',
+            subir_sismos_pipeline, df_metricas_sismos,
+            kobo_cfg['api_token'], kobo_cfg['username'],
+            form_id_sismos=kobo_cfg['form_id_sismos'],
         )
 
         logger.info('=== PIPELINE COMPLETO: TODAS LAS FASES OK ===')

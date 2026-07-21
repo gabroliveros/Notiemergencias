@@ -52,6 +52,7 @@ def upload_koboform(file, server=SERVER_DEFAULT, api_token=None, asset_uid=None)
             generar_xlsform_noticias, 
             generar_xlsform_metricas_alerta,
             generar_xlsform_precipitacion_nacional,
+            generar_xlsform_sismos
         )
 
         os.makedirs(os.path.join(basedir, 'xlsforms'), exist_ok=True)
@@ -64,6 +65,9 @@ def upload_koboform(file, server=SERVER_DEFAULT, api_token=None, asset_uid=None)
         elif file in ('precipitacion_nacional',):
             print(f'No se encontró {kobo_form_xlsx}. Generando XLSForm automáticamente.')
             generar_xlsform_precipitacion_nacional(kobo_form_xlsx)
+        elif file in ('sismos_nacional',):
+            print(f'No se encontró {kobo_form_xlsx}. Generando XLSForm automáticamente.')
+            generar_xlsform_sismos(kobo_form_xlsx)
 
         if not os.path.exists(kobo_form_xlsx):
             alt_path = os.path.join(basedir, 'kobo', nombre)

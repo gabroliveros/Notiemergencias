@@ -5,7 +5,8 @@
         "username": "PON_AQUI_TU_USUARIO_KOBO",
         "form_id_noticias": "noticias_emergencia",
         "form_id_metricas": "metricas_alerta",
-        "form_id_precipitacion": "precipitacion_nacional"
+        "form_id_precipitacion": "precipitacion_nacional",
+        "form_id_sismos": "sismos_nacional"
     },
     "rutas": {
         "_comentario_descargas": "Todos los CSV/xlsx/logs de una corrida viven aquí. Se limpia al empezar una corrida nueva, salvo que sea la misma situacion, el mismo dia, y la corrida anterior haya sido hace menos de 'horas_reutilizar_descargas'.",
@@ -110,6 +111,21 @@
             "la guaira": {"capital": "La Guaira", "lat": 10.6000, "lon": -66.9331},
             "yaracuy": {"capital": "San Felipe", "lat": 10.3353, "lon": -68.7458},
             "zulia": {"capital": "Maracaibo", "lat": 10.6333, "lon": -71.6333}
+        }
+    },
+    "sismos": {
+        "ventana_dias": 30,
+        "minmagnitude": 2.5,
+        "radio_km_maximo": 150,
+        "umbrales": {
+        "sucre": {"umbral_amarillo": 4.0, "umbral_naranja": 5.0, "umbral_rojo": 6.0},
+        "nueva esparta": {"umbral_amarillo": 4.0, "umbral_naranja": 5.0, "umbral_rojo": 6.0},
+        "zulia": {"umbral_amarillo": 4.5, "umbral_naranja": 5.5, "umbral_rojo": 6.5},
+        "tachira": {"umbral_amarillo": 4.0, "umbral_naranja": 5.0, "umbral_rojo": 6.0},
+        "merida": {"umbral_amarillo": 4.0, "umbral_naranja": 5.0, "umbral_rojo": 6.0},
+        "miranda": {"umbral_amarillo": 4.0, "umbral_naranja": 5.0, "umbral_rojo": 6.0},
+        "distrito capital": {"umbral_amarillo": 4.0, "umbral_naranja": 5.0, "umbral_rojo": 6.0},
+        "_default": {"umbral_amarillo": 4.5, "umbral_naranja": 5.5, "umbral_rojo": 6.5}
         }
     }
 }

@@ -32,6 +32,7 @@ from kobo.gestionar_formularios import enviar_filas
 FORM_ID_NOTICIAS = 'noticias_emergencia'
 FORM_ID_METRICAS = 'metricas_alerta'
 FORM_ID_PRECIPITACION = 'precipitacion_nacional'
+FORM_ID_SISMOS = 'sismos_nacional'
 
 ORDEN_NIVEL = {'Rojo': 0, 'Naranja': 1, 'Amarillo': 2, 'Verde': 3}
 
@@ -176,6 +177,19 @@ def preparar_fila_precipitacion(fila):
     }
 
 
+def preparar_fila_sismo(fila):
+    return {
+        'fecha_calculo': pd.Timestamp(fila['fecha_calculo']).isoformat(),
+        'estado': fila['estado'],
+        'ventana_dias': int(fila['ventana_dias']),
+        'n_sismos': int(fila['n_sismos']),
+        'magnitud_maxima': float(fila['magnitud_maxima']),
+        'magnitud_promedio': float(fila['magnitud_promedio']),
+        'profundidad_promedio_km': float(fila['profundidad_promedio_km']),
+        'nivel_alerta': fila['nivel_alerta'],
+    }
+
+
 # --------------------------------------------------------------------------
 # Pipeline completo
 # --------------------------------------------------------------------------
@@ -196,6 +210,15 @@ def pipeline_precipitacion(df_precipitacion, api_token, username, form_id_precip
         return []
     print('\nEnviando datos de precipitación nacional...')
     return enviar_filas(form_id_precipitacion, filas, api_token, username)
+
+
+def pipeline_sismos(df_metricas_sismos, api_token, username, form_id_sismos=FORM_ID_SISMOS):
+    if df_metricas_sismos.empty:
+        print('Sin métricas sísmicas para enviar.')
+        return []
+    filas = [preparar_fila_sismo(fila) for _, fila in df_metricas_sismos.iterrows()]
+    print('\nEnviando métricas sísmicas...')
+    return enviar_filas(form_id_sismos, filas, api_token, username)
 
 
 def pipeline_completo(
