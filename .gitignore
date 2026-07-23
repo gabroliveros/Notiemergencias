@@ -4,6 +4,7 @@ kobo/logs/
 kobo/logs/
 originales/*
 xlsforms/*
+tablero/sensor_eventos2.pbix
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

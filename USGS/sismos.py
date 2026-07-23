@@ -135,9 +135,9 @@ def escanear_sismos_nacional(ventana_dias, minmagnitude, radio_km_maximo, capita
             "estado": nombre_choice(estado),
             "ventana_dias": ventana_dias,
             "n_sismos": len(grupo),
-            "magnitud_maxima": magnitud_maxima,
-            "magnitud_promedio": grupo["magnitud"].mean(),
-            "profundidad_promedio_km": grupo["profundidad_km"].mean(),
+            "magnitud_maxima": round(magnitud_maxima, 2),
+            "magnitud_promedio": round(grupo["magnitud"].mean(), 2),
+            "profundidad_promedio_km": round(grupo["profundidad_km"].mean(), 2),
             "nivel_alerta": calcular_nivel_alerta(magnitud_maxima, umbrales_estado).lower(),
         })
 
